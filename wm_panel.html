@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>WM Control Panel</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif; }
+    body { margin: 16px; }
+    h1 { margin: 0 0 12px; font-size: 18px; }
+    .card { border: 1px solid #e2e2e2; border-radius: 10px; padding: 12px; margin: 0 0 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    label { font-size: 12px; color: #333; display: block; margin-bottom: 4px; }
+    input[type="text"], input[type="password"] { width: 300px; padding: 6px 8px; border-radius: 8px; border: 1px solid #cfcfcf; }
+    button { padding: 8px 12px; border: 1px solid #cfcfcf; background: #fafafa; border-radius: 8px; cursor: pointer; }
+    button:hover { background: #f1f1f1; }
+    .muted { color: #666; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ok { color: #077407; }
+    .err { color: #b00020; }
+    .stack { display: flex; flex-direction: column; gap: 8px; }
+    .grid2 { display: grid; grid-template-columns: max-content 1fr; gap: 4px 8px; }
+    .spacer { height: 4px; }
+    .tiny { font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>WM Control Panel</h1>
+
+  <div class="card stack">
+    <div class="row">
+      <div>
+        <label for="secret">WebApp Secret</label>
+        <input id="secret" type="password" placeholder="enter WM_WEBAPP_SHARED_SECRET">
+        <div class="tiny">
+          <label><input id="remember" type="checkbox"> remember secret in this browser</label>
+        </div>
+      </div>
+      <button id="btnState">Get State</button>
+    </div>
+    <div id="state" class="mono tiny muted">state: &mdash;</div>
+  </div>
+
+  <div class="card stack">
+    <div class="row">
+      <div>
+        <label for="startId">Start Message ID (inclusive)</label>
+        <input id="startId" type="text" placeholder="e.g. 123456789012345678">
+      </div>
+      <button id="btnSet">Set Start ID</button>
+      <button id="btnClear">Clear Start ID</button>
+    </div>
+    <div class="tiny muted">Polling will process this message first, then newer ones.</div>
+  </div>
+
+  <div class="card stack">
+    <div class="row">
+      <button id="btnPost">Post/Update Weekly Board</button>
+      <button id="btnDelete">Delete Weekly Cluster</button>
+      <button id="btnStart">Start Polling (from ID)</button>
+      <button id="btnDebug">Debug Settings</button>
+      <button id="btnProbe">Probe Bronze</button>
+    </div>
+    <div class="tiny muted">Uses your configured channels in Script Properties.</div>
+  </div>
+
+  <!-- Team Index Debug -->
+<div class="card" style="margin-top:12px">
+  <h3>Team Index Debug</h3>
+  <div style="margin:6px 0;">
+    <label>
+      <input type="checkbox" id="idxReset">
+      Reset cache before sampling
+    </label>
+  </div>
+  <div class="btnrow" style="display:flex; gap:8px; margin:8px 0;">
+    <button id="btnIdxShow">Show Snapshot</button>
+    <button id="btnIdxResetShow">Reset &amp; Show Snapshot</button>
+  </div>
+  <pre id="idxOut" class="mono small" style="max-height:240px; overflow:auto; background:#111; color:#eee; padding:8px; border-radius:6px;"></pre>
+</div>
+
+
+  <div id="out" class="tiny mono muted">ready.</div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const out = (msg, cls='') => {
+      const el = document.getElementById('out');
+      el.className = 'tiny mono ' + (cls || 'muted');
+      el.textContent = String(msg);
+    };
+    const showState = (obj) => {
+      document.getElementById('state').textContent = JSON.stringify(obj, null, 2);
+    };
+
+    // localStorage secret
+    (function initSecret(){
+      const saved = localStorage.getItem('wm_secret');
+      if (saved) { $('secret').value = saved; $('remember').checked = true; }
+      $('remember').addEventListener('change', () => {
+        if ($('remember').checked) localStorage.setItem('wm_secret', $('secret').value || '');
+        else localStorage.removeItem('wm_secret');
+      });
+      $('secret').addEventListener('input', () => {
+        if ($('remember').checked) localStorage.setItem('wm_secret', $('secret').value || '');
+      });
+    })();
+
+    function needSecret() {
+      const s = $('secret').value.trim();
+      if (!s) { out('secret required for this action', 'err'); throw new Error('missing secret'); }
+      return s;
+    }
+
+    (function () {
+    // Small helpers (use your existing ones if present)
+    function $(id){ return document.getElementById(id); }
+    function unwrapOk(res){
+      // Handle _ok_ wrapper or plain object
+      if (res && res.ok && res.data) return res.data;
+      return res;
+    }
+    function printIndexResult(res) {
+      var el = $('idxOut');
+      if (!res) { el.textContent = 'No response'; return; }
+
+      if (res.ok === false && res.error) {
+        el.textContent = 'Error: ' + (res.error.message || res.error || JSON.stringify(res.error));
+        return;
+      }
+
+      var o = unwrapOk(res) || {};
+      var lines = [];
+      lines.push('cacheKey:     ' + (o.cacheKey || '(none)'));
+      lines.push('spreadsheetId:' + (o.spreadsheetId || '(unset)'));
+      lines.push('divisions:    ' + ((o.divisions || []).join(', ') || '(none)'));
+      lines.push('totalTeams:   ' + (o.totalTeams != null ? o.totalTeams : '(unknown)'));
+      lines.push('byDivision:   ' + JSON.stringify(o.byDivision || {}));
+      lines.push('samples:      ' + JSON.stringify(o.samples || {}));
+      $('idxOut').textContent = lines.join('\n');
+    }
+
+    // Show Snapshot (honor the "Reset cache before sampling" checkbox)
+    $('btnIdxShow').onclick = function () {
+      var secret = (typeof needSecret === 'function') ? needSecret() : ($('secret') && $('secret').value);
+      if (!secret) { alert('Enter secret first.'); return; }
+      var reset = !!$('idxReset').checked;
+      if (typeof out === 'function') out('Fetching team index snapshot' + (reset ? ' (after reset)…' : '…'));
+      google.script.run
+        .withSuccessHandler(printIndexResult)
+        .withFailureHandler(function (e) { $('idxOut').textContent = 'Failure: ' + (e && e.message || e); })
+        .server_debugIndexSnapshot(secret, { reset: reset });
+    };
+
+    // Reset & Show Snapshot (always resets)
+    $('btnIdxResetShow').onclick = function () {
+      var secret = (typeof needSecret === 'function') ? needSecret() : ($('secret') && $('secret').value);
+      if (!secret) { alert('Enter secret first.'); return; }
+      if (typeof out === 'function') out('Resetting cache and fetching team index snapshot…');
+      google.script.run
+        .withSuccessHandler(printIndexResult)
+        .withFailureHandler(function (e) { $('idxOut').textContent = 'Failure: ' + (e && e.message || e); })
+        .server_debugIndexSnapshot(secret, { reset: true });
+    };
+  })();
+
+    $('btnState').onclick = function() {
+      out('loading state…');
+      google.script.run.withSuccessHandler(function(res){
+        out(res.ok ? 'ok' : (res.error || 'error'), res.ok ? 'ok' : 'err');
+        if (res.ok) showState(res.data);
+      }).withFailureHandler(function(e){
+        out('script error: ' + e.message, 'err');
+      }).server_getState();
+    };
+
+    $('btnSet').onclick = function() {
+      const secret = needSecret();
+      const id = $('startId').value.trim();
+      if (!/^\d{5,30}$/.test(id)) { out('invalid message id', 'err'); return; }
+      out('setting start id…');
+      google.script.run.withSuccessHandler(function(res){
+        out(res.ok ? ('set: ' + JSON.stringify(res.data)) : res.error, res.ok ? 'ok' : 'err');
+      }).withFailureHandler(function(e){
+        out('script error: ' + e.message, 'err');
+      }).server_setStartId(secret, id);
+    };
+
+    $('btnClear').onclick = function() {
+      const secret = needSecret();
+      out('clearing start id…');
+      google.script.run.withSuccessHandler(function(res){
+        out(res.ok ? 'cleared' : res.error, res.ok ? 'ok' : 'err');
+      }).withFailureHandler(function(e){
+        out('script error: ' + e.message, 'err');
+      }).server_clearStartId(secret);
+    };
+
+    $('btnPost').onclick = function() {
+      const secret = needSecret();
+      out('posting/updating weekly board…');
+      google.script.run.withSuccessHandler(function(res){
+        out(res.ok ? ('done: ' + JSON.stringify(res.data)) : res.error, res.ok ? 'ok' : 'err');
+      }).withFailureHandler(function(e){
+        out('script error: ' + e.message, 'err');
+      }).server_postOrUpdate(secret);
+    };
+
+    $('btnDelete').onclick = function() {
+      const secret = needSecret();
+      out('deleting weekly cluster…');
+      google.script.run.withSuccessHandler(function(res){
+        out(res.ok ? 'deleted' : res.error, res.ok ? 'ok' : 'err');
+      }).withFailureHandler(function(e){
+        out('script error: ' + e.message, 'err');
+      }).server_deleteWeeklyCluster(secret);
+    };
+
+    $('btnDebug').onclick = function() {
+      const secret = needSecret();
+      out('debug button…');
+      google.script.run.withSuccessHandler(function(res){
+        out(res.ok ? 'debug' : res.error, res.ok ? 'ok' : 'err');
+      }).withFailureHandler(function(e){
+        out('script error: ' + e.message, 'err');
+      }).server_verifyConfig(secret);
+    };
+
+    $('btnStart').onclick = function() {
+      const secret = needSecret();
+      const id = $('startId').value.trim();
+      if (!/^\d{5,30}$/.test(id)) { out('invalid message id', 'err'); return; }
+      out('starting poll from ID…');
+
+      // Optional: if you want to force DRY_RUN during this run, set third arg to 'true' or 'false'
+      const dryRunOverride = null; // or 'true' / 'false'
+
+      google.script.run.withSuccessHandler(function(res){
+      if (res.ok) {
+        out('poll finished: lastPointer=' + res.data.lastPointer + ' (' + res.data.tookMs + ' ms)', 'ok');
+      } else {
+        out(res.error || 'error', 'err');
+      }
+    })
+    .withFailureHandler(function(e){
+      out('script error: ' + e.message, 'err');
+    })
+    .server_startPollingFrom(secret, id, dryRunOverride);
+  };
+  </script>
+</body>
+</html>
