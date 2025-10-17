@@ -13,6 +13,28 @@ function _gridMeta_() {
   };
 }
 
+/** Returns the "General" sheet (change name here if yours differs). */
+function getGeneralSheet_() {
+  if (typeof getSheetByName_ === 'function') return getSheetByName_('General');
+  var ss = SpreadsheetApp.getActive();
+  return ss.getSheetByName('General');
+}
+
+/** Load all canonical maps from General!J2:J (non-blank). */
+function getAllMapsList_() {
+  var sh = getGeneralSheet_();
+  if (!sh) return [];
+  var max = sh.getMaxRows();
+  if (max < 2) return [];
+  var vals = sh.getRange(2, 10, max - 1, 1).getDisplayValues(); // J=10
+  var out = [];
+  for (var i = 0; i < vals.length; i++) {
+    var v = String(vals[i][0] || '').trim();
+    if (v) out.push(v);
+  }
+  return out;
+}
+
 function _parseSheetDateET_(s) {
   s = String(s || '').trim();
   if (!s) return null;

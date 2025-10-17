@@ -2,6 +2,8 @@
 // board.gs – Weekly board rendering and posting
 // =======================
 
+// ----- Create Weekly Tables -----
+
 function upsertWeeklyDiscordMessage_(week) {
   // ---- Normalize inputs
   week = week || {};
@@ -24,27 +26,33 @@ function upsertWeeklyDiscordMessage_(week) {
     wkKey = dIso + '|' + mRef;
   }
 
-  // ---- Compose content
-  var store  = (typeof loadWeekStore_ === 'function') ? loadWeekStore_(wkKey) : null;
-  var pages  = (typeof renderTablesPages_ === 'function') ? (renderTablesPages_(week, store) || []) : [];
+  // ---- Compose content (header + two plain-text bodies)
   var header = (typeof renderHeaderEmbedPayload_ === 'function') ? renderHeaderEmbedPayload_(week) : null;
 
-  // Safety: ensure we only ever have ONE tables page in this flow.
-  if (Array.isArray(pages) && pages.length > 1) {
-    pages = [pages.join('\n\n')];
+  var weeklyBody = (typeof renderWeeklyTablesBody_ === 'function') ? renderWeeklyTablesBody_(week) : '';
+  var makeupsArr = (typeof getMakeupMatchesAllDivs_ === 'function') ? getMakeupMatchesAllDivs_(week) : [];
+  var remBody    = (typeof renderRematchesTableBody_ === 'function') ? renderRematchesTableBody_(makeupsArr) : '';
+
+  // If no rematches, append a note to weekly body
+  if (!remBody || !/\S/.test(remBody)) {
+    if (weeklyBody && /\S/.test(weeklyBody)) {
+      weeklyBody += '\n\n*No rematches currently pending.*';
+    }
+    remBody = ''; // ensure empty
   }
 
-  // ---- Upsert: header + one tables message, storing IDs and hashes
-var channelId = PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID') ||
-                (typeof WEEKLY_POST_CHANNEL_ID !== 'undefined' ? WEEKLY_POST_CHANNEL_ID : '');
-if (!channelId) throw new Error('WEEKLY_POST_CHANNEL_ID missing');
+  // ---- Upsert: header + weekly + rematches (plain content for tables)
+  var channelId = PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID') ||
+                  (typeof WEEKLY_POST_CHANNEL_ID !== 'undefined' ? WEEKLY_POST_CHANNEL_ID : '');
+  if (!channelId) throw new Error('WEEKLY_POST_CHANNEL_ID missing');
 
-// Load existing IDs
-var ids = _loadMsgIds_(wkKey);
+  // ---- Upsert: header + one tables message, with safe fallbacks
+var ids = _loadMsgIds_(wkKey); // { header, table, tables[], rematch? }
 
-var headerHash = _safeHeaderHash_(header);
+// Hashes
+var headerHash = _safeHeaderHash_(header); // your helper that strips footer/timestamp etc
 var tableBody  = (pages && pages.length) ? String(pages[0] || '') : '';
-var tableHash  = sha256Hex_(tableBody);
+var tableHash  = tableBody ? sha256Hex_(tableBody) : '';
 
 // Load previous hashes
 var hashKey = 'WEEKLY_MSG_HASHES::' + wkKey;
@@ -52,50 +60,81 @@ var prev = (function(){ try { return JSON.parse(PropertiesService.getScriptPrope
 var prevHeaderHash = prev.header || '';
 var prevTableHash  = prev.table  || '';
 
-var actionHeader = 'noop';
-var actionTable  = 'noop';
+var actionHeader = 'noop', actionTable = 'noop';
 
-// 1) Header
-if (!ids.header) {
-  ids.header = postChannelMessageAdvanced_(channelId, '', header.embeds);
-  actionHeader = 'created';
-} else if (prevHeaderHash !== headerHash) {
-  editChannelMessageAdvanced_(channelId, ids.header, '', header.embeds);
-  actionHeader = 'edited';
-}
-
-// 2) Tables (single message)
-if (tableBody) {
-  if (!ids.table) {
-    ids.table = postChannelMessage_(channelId, tableBody);
-    actionTable = 'created';
-  } else if (prevTableHash !== tableHash) {
-    editChannelMessage_(channelId, ids.table, tableBody);
-    actionTable = 'edited';
+// 1) Header — create if missing, else edit only if changed
+try {
+  if (!ids.header) {
+    ids.header = postChannelMessageAdvanced_(channelId, '', header.embeds);
+    actionHeader = ids.header ? 'created' : 'noop';
+  } else if (prevHeaderHash !== headerHash) {
+    // only edit if we have a valid id
+    editChannelMessageAdvanced_(channelId, ids.header, '', header.embeds);
+    actionHeader = 'edited';
+  }
+} catch (e) {
+  // If edit failed due to missing/invalid ID, fall back to create once
+  try {
+    ids.header = postChannelMessageAdvanced_(channelId, '', header.embeds);
+    actionHeader = ids.header ? 'created' : 'noop';
+  } catch (e2) {
+    throw new Error('Failed to upsert header: ' + (e2 && e2.message));
   }
 }
 
-// 3) Clean up any legacy extras; then persist IDs
+// 2) Tables — create if missing, else edit only if changed
+try {
+  if (tableBody) {
+    if (!ids.table) {
+      ids.table = postChannelMessage_(channelId, tableBody);
+      actionTable = ids.table ? 'created' : 'noop';
+    } else if (prevTableHash !== tableHash) {
+      editChannelMessage_(channelId, ids.table, tableBody);
+      actionTable = 'edited';
+    }
+  }
+} catch (e) {
+  // If edit failed due to missing/invalid ID, fall back to create once
+  try {
+    ids.table = postChannelMessage_(channelId, tableBody);
+    actionTable = ids.table ? 'created' : 'noop';
+  } catch (e2) {
+    throw new Error('Failed to upsert tables: ' + (e2 && e2.message));
+  }
+}
+
+// Normalize legacy fields and persist
 ids.tables = ids.table ? [ids.table] : [];
 ids = _saveMsgIds_(wkKey, ids);
 
-// 4) Save new hashes
+// Save new hashes
 PropertiesService.getScriptProperties().setProperty(hashKey, JSON.stringify({ header: headerHash, table: tableHash }));
 
-// 5) Return a clear result
+// Build result + helpful context
+var created = [], edited = [];
+if (actionHeader === 'created' && ids.header) created.push(ids.header);
+if (actionHeader === 'edited'  && ids.header) edited.push(ids.header);
+if (actionTable  === 'created' && ids.table)  created.push(ids.table);
+if (actionTable  === 'edited'  && ids.table)  edited.push(ids.table);
+
 var result = {
   ok: true,
   weekKey: wkKey,
   channelId: channelId,
   headerId: ids.header || '',
   tableId:  ids.table  || '',
-  action:   (actionHeader === 'created' || actionTable === 'created') ? 'created'
-           : (actionHeader === 'edited'  || actionTable === 'edited')  ? 'edited'
-           : 'no_change',
+  action:   (created.length ? 'created' : (edited.length ? 'edited' : 'no_change')),
   prevHash: { header: prevHeaderHash, table: prevTableHash },
-  newHash:  { header: headerHash,     table: tableHash }
+  newHash:  { header: headerHash,     table: tableHash },
+  created: created,
+  edited:  edited,
+  messageIds: [ids.header, ids.table].filter(Boolean)
 };
 
+// Optional: log a concise trace for WM_LOG / debug
+try { logLocal_('INFO','weekly.board.upsert', { wkKey: wkKey, ids: { header: ids.header, table: ids.table }, actions: { header: actionHeader, table: actionTable } }); } catch (_){}
+
+return result;
 
   // --- Compose & emit human notice (SAFE even if created/edited are not defined) ---
 
@@ -175,11 +214,8 @@ function renderHeaderEmbedPayload_(week) {
 }
 
 /**
- * Compose ONE Discord message body:
- *  - Bronze current table
- *  - Silver current table
- *  - Gold   current table
- *  - Make-ups (if any)
+ * Compose ONE Discord message body for current week Bronze / silver / gold current tables
+ * and ONE Discord message body for rematches (if they exist) grouped by map then division
  * Returns [string] or [] if nothing to post.
  */
 function renderTablesPages_(week, store) {
@@ -203,11 +239,11 @@ function renderTablesPages_(week, store) {
     if (block && /\S/.test(block)) chunks.push(block);
   }
 
-  // Make-ups / rematches
+  // inside renderTablesPages_(week, store) AFTER the three current week tables:
   var makeupsArr = (typeof getMakeupMatchesAllDivs_ === 'function') ? getMakeupMatchesAllDivs_(week) : [];
   var remBody = (typeof renderRematchesTableBody_ === 'function') ? renderRematchesTableBody_(makeupsArr) : '';
   if (remBody && /\S/.test(remBody)) {
-    if (chunks.length) chunks.push(''); // spacing before rematches
+    if (chunks.length) chunks.push(''); // blank line before the single rematches table
     chunks.push(remBody);
   }
 
@@ -278,9 +314,31 @@ function renderDivisionWeekTable_(division, week) {
 }
 
 /**
- * Pretty make-ups/rematches table.
- * Accepts a flat array: [{division, mapRef, home, away, ...}, ...]
- * Groups by map, orders Bronze→Silver→Gold, same column widths as current-week tables.
+ * Join Bronze, Silver, Gold pretty tables into ONE body (plain content).
+ * Expects renderDivisionWeekTablePretty_(division, matches, label) to return a fenced block.
+ */
+function renderWeeklyTablesBody_(week) {
+  var divs = (typeof getDivisionSheets_==='function') ? getDivisionSheets_() : ['Bronze','Silver','Gold'];
+  var chunks = [];
+
+  for (var i=0;i<divs.length;i++){
+    var div = divs[i];
+    var top = (typeof resolveDivisionBlockTop_==='function') ? resolveDivisionBlockTop_(div, week) : 0;
+    if (!top) continue;
+
+    var matches = (typeof getMatchesForDivisionWeek_==='function') ? getMatchesForDivisionWeek_(div, top) : [];
+    if (!matches || !matches.length) continue;
+
+    var block = (typeof renderDivisionWeekTable_==='function') ? renderDivisionWeekTable_(div, matches, div) : '';
+    if (block && /\S/.test(block)) chunks.push(block);
+  }
+
+  return (chunks.join('\n\n') || '').trim();
+}
+
+/**
+ * Single combined rematches table (one code fence).
+ * Grouped by map → division; banner lines centered on the first '|' divider.
  */
 function renderRematchesTableBody_(items) {
   items = Array.isArray(items) ? items.slice() : [];
@@ -290,12 +348,52 @@ function renderRematchesTableBody_(items) {
   items = items.filter(function(x){ return x && x.home && x.away && !isBye(x.home) && !isBye(x.away); });
   if (!items.length) return '';
 
+  // Required helpers/widths used by your weekly tables
+  if (typeof _getTableWidths_ !== 'function' || typeof _padC_ !== 'function') return '';
+  var W = _getTableWidths_();
+
+  // Header line (exactly like weekly)
+  var hdr = (typeof _formatVsHeader_ === 'function')
+    ? _formatVsHeader_(W.COL1)
+    : _padC_('Home  vs  Away', W.COL1);
+  hdr = hdr + ' | ' + _padC_('Scheduled', W.COL2) + ' | ' + _padC_('Shoutcaster', W.COL3);
+
+  var fullLen = hdr.length;
+  var sep = (typeof _repeat_ === 'function') ? _repeat_('-', fullLen) : new Array(fullLen+1).join('-');
+
+  // Center a banner label around the FIRST '|' divider (between COL1 and COL2)
+  function centerAtDivider(label) {
+    var rep = (typeof _repeat_ === 'function') ? _repeat_ : function(s,n){ return new Array(n+1).join(s); };
+    label = ' ' + String(label || '').trim() + ' ';
+    var L = Math.min(label.length, fullLen);
+
+    // position of the '|' in "COL1 + ' | ' + ...": the pipe is at COL1+1 (0-based)
+    var dividerIndex = W.COL1 + 1;
+
+    // start index so that label's center aligns to the divider column
+    var start = Math.max(0, dividerIndex - Math.floor(L / 2));
+    if (start + L > fullLen) start = fullLen - L;
+
+    return rep(' ', start) + label.slice(0, L) + rep(' ', fullLen - start - L);
+  }
+
+  // vs cell identical to weekly tables
+  function vsCell(home, away) {
+    if (typeof _formatVsRow_ === 'function') return _formatVsRow_(home, away, W.COL1);
+    var leftW  = Math.floor((W.COL1 - 3) / 2);
+    var rightW = W.COL1 - 3 - leftW;
+    var l = (typeof _padR_==='function') ? _padR_(home, leftW) : String(home||'').padEnd(leftW, ' ');
+    var r = (typeof _padL_==='function') ? _padL_(away, rightW): String(away||'').padStart(rightW,' ');
+    return l + ' vs ' + r;
+  }
+
+  // Sort: map ASC → division Bronze→Silver→Gold → home/away alpha
   var DIV_ORDER = { Bronze:0, Silver:1, Gold:2 };
   items.sort(function(a,b){
     var ma = String(a.mapRef||'').toLowerCase(), mb = String(b.mapRef||'').toLowerCase();
     if (ma !== mb) return ma < mb ? -1 : 1;
-    var da = DIV_ORDER[a.division] != null ? DIV_ORDER[a.division] : 99;
-    var db = DIV_ORDER[b.division] != null ? DIV_ORDER[b.division] : 99;
+    var da = (DIV_ORDER[a.division] != null) ? DIV_ORDER[a.division] : 99;
+    var db = (DIV_ORDER[b.division] != null) ? DIV_ORDER[b.division] : 99;
     if (da !== db) return da - db;
     var ha = String(a.home||'').toLowerCase(), hb = String(b.home||'').toLowerCase();
     if (ha !== hb) return ha < hb ? -1 : 1;
@@ -303,51 +401,184 @@ function renderRematchesTableBody_(items) {
     return (aa < ab) ? -1 : (aa > ab ? 1 : 0);
   });
 
-  if (typeof _getTableWidths_ !== 'function' || typeof _padC_ !== 'function') return '';
-
-  var W = _getTableWidths_();
-  var header = (typeof _formatVsHeader_ === 'function')
-      ? _formatVsHeader_(W.COL1)
-      : _padC_('Home  vs  Away', W.COL1);
-  header = header + ' | ' + _padC_('Scheduled', W.COL2) + ' | ' + _padC_('Shoutcaster', W.COL3);
-  var sep    = (typeof _repeat_ === 'function') ? _repeat_('-', header.length) : new Array(header.length+1).join('-');
-
-  function vsCell(home, away) {
-    if (typeof _formatVsRow_ === 'function') return _formatVsRow_(home, away, W.COL1);
-    var leftW  = Math.floor((W.COL1 - 3)/2);
-    var rightW = W.COL1 - 3 - leftW;
-    return _padR_(home, leftW) + ' vs ' + _padL_(away, rightW);
-  }
-
   var out = [];
   out.push('**Make-ups & Rematches**');
+  out.push('```text');
+  out.push(hdr);
+  out.push(sep);
 
-  var currentMap = null;
-  for (var i=0;i<items.length;i++){
-    var it = items[i];
+  var currentMap = null, currentDiv = null;
+
+  for (var i = 0; i < items.length; i++) {
+    var it  = items[i];
     var map = it.mapRef || 'TBD';
+    var div = it.division || '';
+
     if (map !== currentMap) {
       currentMap = map;
-      out.push('');
-      out.push('**' + currentMap + '**');
+      currentDiv = null;
+      out.push(centerAtDivider(map)); // map banner centered on the divider
     }
-    // show division tag inside the block
-    out.push('**' + (it.division || '') + '**');
-    out.push('```text');
-    out.push(header);
-    out.push(sep);
-    // consume this map+division run
-    out.push(vsCell(it.home, it.away) + ' | ' + _padC_('TBD', W.COL2) + ' | ' + _padC_('-', W.COL3));
+    /*if (div && div !== currentDiv) {
+      currentDiv = div;
+      out.push(centerAtDivider(div)); // division banner centered on the divider
+    }*/ 
 
-    // Look-ahead to append more rows for same map+division
-    while (i+1 < items.length &&
-           (items[i+1].mapRef||'TBD') === currentMap &&
-           (items[i+1].division||'') === (it.division||'')) {
-      i++;
-      var it2 = items[i];
-      out.push(vsCell(it2.home, it2.away) + ' | ' + _padC_('TBD', W.COL2) + ' | ' + _padC_('-', W.COL3));
-    }
-    out.push('```');
+    var row = vsCell(it.home, it.away) + ' | ' + _padC_('TBD', W.COL2) + ' | ' + _padC_('-', W.COL3);
+    out.push(row);
   }
+
+  out.push('```');
   return out.join('\n');
+}
+
+// ----- Update Tables from User Input -----
+
+/** Parse "YYYY-MM-DD|map" into a week object with a real Date in local ET. */
+function _weekFromKey_(wkKey) {
+  var parts = String(wkKey || '').split('|');
+  var iso = parts[0] || '';
+  var mapRef = parts[1] || '';
+  var y = +iso.slice(0,4), m = +iso.slice(5,7), d = +iso.slice(8,10);
+  var dt = new Date(y, m-1, d); // local date (Apps Script runs server-side but okay for day granularity)
+  return { date: dt, mapRef: mapRef, weekKey: wkKey };
+}
+
+/** Canonicalize division label. */
+function _canonDivision_(d) {
+  if (!d) return '';
+  var s = String(d).trim().toLowerCase();
+  if (s === 'bronze' || s === 'b') return 'Bronze';
+  if (s === 'silver' || s === 's') return 'Silver';
+  if (s === 'gold'   || s === 'g') return 'Gold';
+  // fallback: capitalize first letter
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Ensure the week store has expected shape. */
+function _ensureStoreShape_(store) {
+  if (!store || typeof store !== 'object') return;
+  if (!store.meta)  store.meta  = {};
+  if (!store.sched) store.sched = {};   // per-division scheduled rows: { [div]: { [rowIndex]: {epochSec?, whenText, home, away} } }
+  if (!store.cast)  store.cast  = {};   // optional: shoutcaster info per row
+}
+
+/**
+ * Find the row index (0..9) of a match in the block for a division.
+ * - top is the header row (A27/A38/…), grid is rows (top+1..top+10)
+ * - compares names in C (home) and G (away)
+ */
+function _findMatchRowIndex_(division, top, home, away) {
+  var sh = (typeof getSheetByName_ === 'function') ? getSheetByName_(division) : null;
+  if (!sh) return -1;
+
+  var gridStartRow = top + 1;
+  var rows = 10; // grid size
+  var band = sh.getRange(gridStartRow, 2, rows, 7).getDisplayValues(); // B..H
+
+  var norm = function(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+  };
+  var nh = norm(home), na = norm(away);
+
+  for (var i = 0; i < band.length; i++) {
+    var r = band[i]; // [B,C,D,E,F,G,H]
+    var ch = norm(r[1]); // C
+    var ca = norm(r[5]); // G
+    if (ch && ca && ch === nh && ca === na) return i;
+  }
+
+  // Soft match: allow partial on either side if unique
+  var candidates = [];
+  for (var j = 0; j < band.length; j++) {
+    var rr = band[j];
+    var ch2 = norm(rr[1]), ca2 = norm(rr[5]);
+    if (!ch2 && !ca2) continue;
+    var hit = (ch2 && (ch2.indexOf(nh) >= 0 || nh.indexOf(ch2) >= 0)) &&
+              (ca2 && (ca2.indexOf(na) >= 0 || na.indexOf(ca2) >= 0));
+    if (hit) candidates.push(j);
+  }
+  return (candidates.length === 1) ? candidates[0] : -1;
+}
+
+/**
+ * Update the weekly tables from parsed pairs and re-render Discord.
+ * @param {string} weekKey  "YYYY-MM-DD|map_ref"
+ * @param {Array<Object>} pairs  [{division, home, away, whenText, epochSec? , weekKey?}, ...]
+ * @returns {{ok:boolean, weekKey:string, updated:number, unmatched:Array, store:any}}
+ */
+function updateTablesMessageFromPairs_(weekKey, pairs) {
+  // --- 0) Normalize inputs
+  pairs = Array.isArray(pairs) ? pairs : [];
+  if (!weekKey) {
+    // fallback: take the weekKey from the first pair, if present
+    weekKey = (pairs[0] && pairs[0].weekKey) ? String(pairs[0].weekKey) : '';
+  }
+  if (!weekKey || weekKey.indexOf('|') < 0) {
+    throw new Error('updateTablesMessageFromPairs_: missing/invalid weekKey');
+  }
+
+  // --- 1) Derive a "week" object from weekKey (YYYY-MM-DD|map)
+  var wkMeta = _weekFromKey_(weekKey);          // {date, mapRef, weekKey}
+  // Allow the sheet to align blocks/canonical division tops etc.
+  if (typeof syncHeaderMetaToTables_ === 'function') {
+    // Use Gold (or Bronze) as canonical to ensure blocks map is present
+    wkMeta = syncHeaderMetaToTables_(wkMeta, 'Gold');
+  }
+
+  // --- 2) Load the store, ensure shape
+  var store = (typeof loadWeekStore_ === 'function') ? (loadWeekStore_(weekKey) || {}) : {};
+  _ensureStoreShape_(store);
+
+  // --- 3) For each pair, locate row inside the division's block and persist schedule
+  var updated = 0;
+  var unmatched = [];
+
+  for (var i = 0; i < pairs.length; i++) {
+    var p = pairs[i] || {};
+    var div = _canonDivision_(p.division);
+    var home = String(p.home || '').trim();
+    var away = String(p.away || '').trim();
+    if (!div || !home || !away) { unmatched.push({ reason:'bad_input', pair:p }); continue; }
+
+    var top = (typeof resolveDivisionBlockTop_ === 'function')
+      ? resolveDivisionBlockTop_(div, wkMeta)
+      : 0;
+    if (!top) {
+      unmatched.push({ reason:'block_top_not_found', division:div, pair:p });
+      continue;
+    }
+
+    var rowIndex = _findMatchRowIndex_(div, top, home, away); // 0..9 or -1
+    if (rowIndex < 0) {
+      unmatched.push({ reason:'row_not_found', division:div, pair:p });
+      continue;
+    }
+
+    // Persist schedule in store: store.sched[division][rowIndex] = { epochSec?, whenText }
+    if (!store.sched[div]) store.sched[div] = {};
+    if (!store.sched[div][rowIndex]) store.sched[div][rowIndex] = {};
+
+    var rec = store.sched[div][rowIndex];
+    if (typeof p.epochSec === 'number') rec.epochSec = p.epochSec;
+    if (p.whenText) rec.whenText = String(p.whenText);
+
+    // (Optional) keep names here to help renderers or debugging
+    rec.home = home; rec.away = away;
+
+    updated++;
+  }
+
+  // --- 4) Save the store and re-render/update Discord (edit in place)
+  if (typeof saveWeekStore_ === 'function') saveWeekStore_(weekKey, store);
+  try {
+    if (typeof upsertWeeklyDiscordMessage_ === 'function') {
+      upsertWeeklyDiscordMessage_(wkMeta); // this will read the same store by weekKey
+    }
+  } catch (e) {
+    // keep going but include error hint in payload
+    store._upsertError = String(e && e.message || e);
+  }
+
+  return { ok:true, weekKey:weekKey, updated:updated, unmatched:unmatched, store:store };
 }

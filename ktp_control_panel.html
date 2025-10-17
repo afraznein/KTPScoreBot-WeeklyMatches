@@ -1,324 +1,425 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top">
-  <meta charset="utf-8">
-  <title>Weekly Matches Control Panel</title>
+  <meta charset="utf-8" />
+  <title>KTP Weekly Matches Panel</title>
   <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    body { margin: 16px; }
-    h1 { margin: 0 0 12px; font-size: 18px; }
-    .card { border: 1px solid #e2e2e2; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .stack { display: flex; flex-direction: column; gap: 8px; }
-    label { font-size: 12px; color: #333; display: block; margin-bottom: 4px; }
-    input[type="text"], input[type="password"] { width: 300px; padding: 6px 8px; border-radius: 8px; border: 1px solid #cfcfcf; }
-    button { padding: 8px 12px; border: 1px solid #cfcfcf; background: #fafafa; border-radius: 8px; cursor: pointer; }
-    button:hover { background: #f1f1f1; }
-    .muted { color: #666; font-size: 12px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .tiny { font-size: 11px; }
-    .status { position: sticky; top: 0; z-index: 10; padding: 6px 10px; margin-bottom: 8px;
-              font: 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-              background: #fffbe6; border: 1px solid #ffe58f; border-radius: 6px; }
-    .status.busy::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px;
-                            border: 2px solid #999; border-top-color: transparent; border-radius: 50%;
-                            animation: spin 0.9s linear infinite; vertical-align: -2px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    /* Debug output dock */
-    .debug-dock { position: fixed; top: 50px; right: 16px; width: 600px; max-height: calc(100vh - 90px);
-                  z-index: 20; background: #0f172a; color: #e2e8f0; border: 1px solid #334155;
-                  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); display: flex;
-                  flex-direction: column; overflow: hidden; }
-    .debug-dock header { display: flex; align-items: center; justify-content: space-between;
-                         gap: 8px; padding: 8px 10px; background: #111827; border-bottom: 1px solid #334155;
-                         font: 13px system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    .debug-dock header .title { font-weight: 600; }
-    .debug-dock header .actions { display: flex; gap: 6px; }
-    .debug-dock button { padding: 4px 8px; border: 1px solid #475569; background: #1f2937;
-                         color: #e5e7eb; border-radius: 6px; font-size: 12px; cursor: pointer; }
-    .debug-dock button:hover { background: #374151; }
-    .debug-body { padding: 8px 10px; overflow: auto; resize: both; }
-    .debug-body pre { margin: 0; white-space: pre-wrap; word-break: break-word;
-                      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-    .debug-dock.collapsed .debug-body { display: none; }
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --card: #1f2937;
+      --muted: #9CA3AF;
+      --ok: #22c55e;
+      --err: #ef4444;
+      --warn:#f59e0b;
+      --txt: #e5e7eb;
+      --accent:#60a5fa;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--txt); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    a { color: var(--accent); text-decoration: none; }
+    h1 { margin: 16px 0 12px; font-size: 22px; }
+    h2 { margin: 14px 0 8px; font-size: 16px; color: var(--muted); font-weight: 600; }
+
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 16px 20px 120px; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid #374151;
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: 0 1px 0 rgb(255 255 255 / 0.02) inset, 0 8px 24px rgb(0 0 0 / 0.25);
+    }
+    .card h2 { margin-top: 2px; }
+
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+    .row label { font-size: 12px; color: var(--muted); margin-right: 6px; }
+    .row input[type="text"], .row input[type="password"] {
+      background: #0b1220;
+      color: var(--txt);
+      border: 1px solid #334155;
+      padding: 8px 10px;
+      border-radius: 8px;
+      min-width: 220px;
+      outline: none;
+    }
+    .row input[type="checkbox"] { transform: translateY(1px); }
+
+    .btn {
+      background: #0b1220;
+      color: var(--txt);
+      border: 1px solid #3b82f6;
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn:hover { background: #0b1529; }
+    .btn.warn { border-color: var(--warn); color: #fff; }
+    .btn.danger { border-color: var(--err); color: #fff; }
+    .btn.ok { border-color: var(--ok); }
+
+    .pill {
+      display: inline-block; padding: 4px 8px; border-radius: 999px;
+      font-size: 12px; font-weight: 700; letter-spacing: .3px;
+      border: 1px solid #374151; background: #0b1220; color: var(--muted);
+    }
+    .status { margin-left: 8px; }
+    .status.ok { color: var(--ok); border-color: var(--ok); }
+    .status.err { color: var(--err); border-color: var(--err); }
+    .status.busy { color: var(--warn); border-color: var(--warn); }
+
+    /* Debug dock (fixed, top-right) */
+    .debug-dock {
+      position: fixed; right: 16px; top: 16px; width: 420px; height: 52vh;
+      background: var(--panel); border: 1px solid #374151; border-radius: 10px;
+      display: flex; flex-direction: column; overflow: hidden; z-index: 9999;
+      box-shadow: 0 8px 28px rgba(0,0,0,.35);
+    }
+    .debug-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px; border-bottom: 1px solid #30363d; background: #0b1220;
+    }
+    .debug-head b { font-size: 12px; color: var(--muted); }
+    .debug-actions { display: flex; gap: 6px; }
+    .debug-actions .btn { padding: 6px 8px; font-size: 12px; }
+    #debugOut {
+      flex: 1; margin: 0; padding: 10px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      background: #0a0f1a; color: #d1d5db; overflow: auto; white-space: pre-wrap; word-wrap: break-word;
+    }
+    .collapsed #debugOut { display: none; }
+    .footer-note { color: var(--muted); font-size: 11px; margin-top: 8px; }
   </style>
 </head>
 <body>
-  <h1>Weekly Matches Control Panel</h1>
-  <div id="status" class="status" style="display:none">Working…</div>
+  <div class="wrap">
+    <h1>KTP Weekly Matches Panel</h1>
 
-  <!-- Debug Output Dock -->
-  <div class="debug-dock" id="debugDock" aria-live="polite">
-    <header>
-      <span class="title">Debug Output</span>
-      <div class="actions">
-        <button id="dbgToggle" title="Collapse/Expand">Toggle</button>
-        <button id="dbgCopy" title="Copy">Copy</button>
-        <button id="dbgClear" title="Clear">Clear</button>
-      </div>
-    </header>
-    <div class="debug-body">
-      <pre id="debugOut"></pre>
-    </div>
-  </div>
-
-  <!-- WebApp Secret -->
-  <div class="card">
-    <div class="row">
-      <div>
-        <label for="secret">WebApp Secret</label>
-        <input id="secret" type="password" placeholder="enter WM_WEBAPP_SHARED_SECRET">
-        <div class="tiny">
-          <label><input id="remember" type="checkbox"> remember secret in this browser</label>
+    <div class="grid">
+      <!-- Connection / Secrets -->
+      <div class="card" style="grid-column: span 12;">
+        <h2>Connection</h2>
+        <div class="row">
+          <label for="secret">WebApp Secret</label>
+          <input id="secret" type="password" placeholder="••••••••" />
+          <label><input id="rememberSecret" type="checkbox" /> remember in this browser</label>
+          <span id="connStatus" class="pill">idle</span>
+        </div>
+        <div class="row">
+          <button id="btnVerifySecrets" class="btn">Verify Secrets</button>
+          <button id="btnState" class="btn">Get State</button>
+          <button id="btnProbe" class="btn">Probe Relay</button>
+        </div>
+        <div class="footer-note">
+          Tip: Script properties supported: <code>WEBAPP_SECRET</code>, <code>WEBAPP_SECRET_V2</code>,
+          <code>RELAY_SHARED_SECRET</code>, <code>PANEL_SECRET</code>. You can also set <code>DEV_MODE=true</code> and <code>SECRET_DEV</code>.
         </div>
       </div>
-      <button id="btnState">Get State</button>
-    </div>
-  </div>
 
-  <!-- Start Message ID Controls -->
-  <div class="card">
-    <div class="row">
-      <div>
-        <label for="startId">Start Message ID (inclusive)</label>
-        <input id="startId" type="text" placeholder="e.g. 123456789012345678">
+      <!-- Polling -->
+      <div class="card" style="grid-column: span 12;">
+        <h2>Polling</h2>
+        <div class="row">
+          <label for="startId">Start Message ID</label>
+          <input id="startId" type="text" placeholder="e.g. 1423841447026622534" />
+        </div>
+        <div class="row">
+          <button id="btnSet" class="btn">Set Start ID</button>
+          <button id="btnClear" class="btn warn">Clear Start ID</button>
+          <button id="btnStart" class="btn ok">Start Polling (from ID, inclusive)</button>
+          <button id="btnStartPointer" class="btn">Start (from last pointer)</button>
+        </div>
       </div>
-      <button id="btnSet">Set Start ID</button>
-      <button id="btnClear">Clear Start ID</button>
-      <button id="btnStart">Start Polling (from ID)</button>
-      <button id="btnStartPointer">Start Polling (from Pointer)</button>
+
+      <!-- Weekly Board -->
+      <div class="card" style="grid-column: span 12;">
+        <h2>Weekly Board</h2>
+        <div class="row">
+          <button id="btnPost" class="btn ok">Post / Update Weekly Board</button>
+          <button id="btnDelete" class="btn danger">Delete Weekly Cluster</button>
+          <button id="btnResetIds" class="btn warn">Reset Saved Header/Table IDs</button>
+        </div>
+        <div class="row">
+          <button id="btnPreview" class="btn">Preview Tables</button>
+          <button id="btnWeekMeta" class="btn">Week Meta</button>
+        </div>
+      </div>
+
+      <!-- Team Index / Debug -->
+      <div class="card" style="grid-column: span 12;">
+        <h2>Team Index Debug</h2>
+        <div class="row">
+          <button id="btnIdxSnap" class="btn">Show Snapshot</button>
+          <label><input id="resetIdxCache" type="checkbox" /> reset cache</label>
+          <button id="btnIdxSnapReset" class="btn warn">Reset &amp; Show Snapshot</button>
+        </div>
+      </div>
     </div>
-    <div class="tiny muted">Polling (from ID) will process that message first, then newer ones.</div>
   </div>
 
-  <!-- Actions -->
-  <div class="card">
-    <div class="row">
-      <button id="btnPost">Post/Update Weekly Board</button>
-      <button id="btnResetIds" class="btn">Reset header/table IDs (this week)</button>
-      <button id="btnDeleteCluster" class="btn btn-danger">Delete weekly cluster (this week)</button>
+  <!-- Debug Dock -->
+  <div id="debugDock" class="debug-dock">
+    <div class="debug-head">
+      <b>debug output</b>
+      <div class="debug-actions">
+        <button id="dbgToggle" class="btn">Hide</button>
+        <button id="dbgCopy" class="btn">Copy</button>
+        <button id="dbgClear" class="btn">Clear</button>
+      </div>
     </div>
-    <div id="out" class="tiny mono muted" style="margin-top:8px;">ready.</div>
+    <pre id="debugOut"></pre>
   </div>
 
   <script>
-(function(){
-  const $ = (id) => document.getElementById(id);
+    // ---------- tiny DOM helpers ----------
+    const $ = (id) => document.getElementById(id);
 
-
-(function rememberSecretWiring(){
-  const $ = (id) => document.getElementById(id);
-  const secretEl = $('secret');
-  const cb       = $('remember');
-
-  function log(msg){ try { if (window.DBG) DBG.write(msg); } catch(_){} }
-
-  function loadFromLocal() {
-    if (!secretEl || !cb) return;
-    try {
-      const saved = localStorage.getItem('WM_SECRET') || '';
-      if (saved) {
-        secretEl.value = saved;
-        cb.checked = true;
-        log('remember-secret: loaded from localStorage');
+    // ---------- debug / status helpers ----------
+    function nowTs() {
+      try {
+        return new Date().toLocaleString(undefined, { hour12: true });
+      } catch (_){ return new Date().toISOString(); }
+    }
+    function out(msg, level) {
+      const pre = $('debugOut');
+      const line = `[${nowTs()}] ${String(msg)}`;
+      pre.textContent += (pre.textContent ? '\n' : '') + line;
+      pre.scrollTop = pre.scrollHeight;
+    }
+    function setBusy(isBusy, text) {
+      const pill = $('connStatus');
+      if (isBusy) {
+        pill.textContent = text ? `busy — ${text}` : 'busy';
+        pill.classList.remove('ok','err'); pill.classList.add('busy');
       } else {
-        cb.checked = false;
+        pill.textContent = 'idle';
+        pill.classList.remove('busy','err'); pill.classList.add('ok');
       }
-    } catch (e) {
-      log('remember-secret: localStorage read failed: ' + e);
     }
-  }
-
-  function persistToLocal() {
-    if (!secretEl || !cb) return;
-    try {
-      if (cb.checked) {
-        localStorage.setItem('WM_SECRET', secretEl.value || '');
-        log('remember-secret: saved to localStorage');
-      } else {
-        localStorage.removeItem('WM_SECRET');
-        log('remember-secret: removed from localStorage');
-      }
-    } catch (e) {
-      log('remember-secret: localStorage write failed: ' + e);
+    function setErr(text) {
+      const pill = $('connStatus');
+      pill.textContent = text || 'error';
+      pill.classList.remove('busy','ok'); pill.classList.add('err');
     }
-  }
 
-  // Save on keystroke if "remember" is checked
-  if (secretEl) secretEl.addEventListener('input', () => {
-    if (cb && cb.checked) persistToLocal();
-  });
-
-  // Save / purge when checkbox toggles
-  if (cb) cb.addEventListener('change', persistToLocal);
-
-  // Load on startup
-  loadFromLocal();
-
-  // Expose a hook so runServer() can force-save right before calls
-  window.__maybePersistSecret = persistToLocal;
-  })();
-
-  // ---- Status line + busy banner (no 'out' name to avoid clashing with #out element) ----
-  function writeStatus(msg, cls){
-    const el = $('out');
-    if (!el) return;
-    el.className = 'tiny mono ' + (cls || 'muted');
-    el.textContent = String(msg);
-  }
-  function setBusy(isBusy, message){
-    const status = $('status');
-    if (!status) return;
-    document.querySelectorAll('button').forEach(b => b.disabled = !!isBusy);
-    if (isBusy) {
-      status.textContent = message || 'Working…';
-      status.classList.add('busy');
-      status.style.display = 'block';
-    } else {
-      status.textContent = '';
-      status.classList.remove('busy');
-      status.style.display = 'none';
+    // ---------- secret persistence ----------
+    function sanitizeSecretFieldValue(val) {
+      return String(val || '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+        .trim();
     }
-  }
-
-  // ---- Debug dock writer ----
-  const DBG = (function(){
-    const box = $('debugOut');
-    const scroller = box && box.parentElement;
-    function ts(){ return new Date().toLocaleString(); }
-    function append(line){
-      if (!box) return;
-      box.textContent += line + '\n';
-      if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    }
-    return {
-      write(msg){ append(`[${ts()}] ${msg}`); },
-      json(label, data){
-        const pretty = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
-        append(`[${ts()}] ${label}\n${pretty}`);
-      },
-      clear(){ if (box) box.textContent = ''; }
-    };
-  })();
-
-  // ---- Debug dock header buttons ----
-  (function wireDock(){
-    const dock = $('debugDock');
-    $('dbgToggle')?.addEventListener('click', () => dock.classList.toggle('collapsed'));
-    $('dbgCopy')?.addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(($('debugOut')?.textContent) || ''); } catch(_){}
+    (function loadSecretFromLocalStorage(){
+      try {
+        const saved = localStorage.getItem('ktp_secret_v2');
+        if (saved) {
+          $('secret').value = saved;
+          $('rememberSecret').checked = true;
+        }
+      } catch(_) {}
+    })();
+    $('rememberSecret').addEventListener('change', function() {
+      try {
+        if (this.checked) {
+          localStorage.setItem('ktp_secret_v2', sanitizeSecretFieldValue($('secret').value));
+        } else {
+          localStorage.removeItem('ktp_secret_v2');
+        }
+      } catch(_) {}
     });
-    $('dbgClear')?.addEventListener('click', () => DBG.clear());
-  })();
+    $('secret').addEventListener('input', function() {
+      if ($('rememberSecret').checked) {
+        try { localStorage.setItem('ktp_secret_v2', sanitizeSecretFieldValue(this.value)); } catch(_) {}
+      }
+    });
 
-  // ---- Shared runner for server calls (uses debug dock + status line) ----
-  function getSecret(){ return ($('secret')?.value || '').trim(); }
-  function runServer(opName, fnName, args, busyMsg){
-    // ensure secret is persisted if "remember" is checked
-    try { if (window.__maybePersistSecret) window.__maybePersistSecret(); } catch(_){}
-    const secret = (document.getElementById('secret')?.value || '').trim();
-    DBG.write(`▶ ${opName}…`);
-    writeStatus(`${opName}…`);
-    setBusy(true, busyMsg || `${opName}…`);
-    const chain = google.script.run
-      .withSuccessHandler((res) => {
-        DBG.json(`✅ ${opName} result`, res);
-        writeStatus(res && res.ok ? `${opName}: ok` : `${opName}: error`, res && res.ok ? 'ok' : 'err');
+    // ---------- button wiring ----------
+    // Verify Secrets
+    $('btnVerifySecrets').onclick = () => {
+      setBusy(true, 'Verifying secrets…'); out('▶ Verify Secrets…');
+      google.script.run.withSuccessHandler(res => {
+        if (res.ok) { out('✅ Verify Secrets result\n' + JSON.stringify(res.data, null, 2), 'ok'); setBusy(false); }
+        else { out('❌ ' + res.error, 'err'); setErr('bad secret props?'); }
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setErr('script error'); })
+      .server_verifySecrets();
+    };
+
+    // Get State
+    $('btnState').onclick = () => {
+      setBusy(true, 'Getting state…'); out('▶ Get State…');
+      google.script.run.withSuccessHandler(res => {
+        if (res.ok) out('✅ State\n' + JSON.stringify(res.data, null, 2), 'ok');
+        else out('❌ ' + res.error, 'err');
         setBusy(false);
-      })
-      .withFailureHandler((err) => {
-        DBG.json(`❌ ${opName} error`, { message: (err && err.message) || String(err) });
-        writeStatus(`${opName}: script error`, 'err');
-        setBusy(false);
-      });
-    return chain[fnName](secret, ...(args || []));
-  }
-
-  // ---- Button handlers (ALL routed to debug dock) ----
-
-  // Get State (doesn’t require secret)
-  $('btnState')?.addEventListener('click', () => {
-    DBG.write('requesting state…');
-    writeStatus('loading state…');
-    google.script.run
-      .withSuccessHandler((res) => {
-        DBG.json('state', res);
-        writeStatus(res.ok ? 'ok' : (res.error || 'error'), res.ok ? 'ok' : 'err');
-        if (res.ok && $('state')) $('state').textContent = JSON.stringify(res.data, null, 2);
-      })
-      .withFailureHandler((e) => {
-        DBG.json('state error', { message: (e && e.message) || String(e) });
-        writeStatus('script error: ' + ((e && e.message) || e), 'err');
-      })
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
       .server_getState();
-  });
+    };
 
-  // Set Start ID
-  $('btnSet')?.addEventListener('click', () => {
-    const id = ($('startId')?.value || '').trim();
-    if (!/^\d{5,30}$/.test(id)) { writeStatus('invalid message id', 'err'); DBG.write('invalid message id'); return; }
-    runServer('Set Start ID', 'server_setStartId', [id], 'Setting start id…');
-  });
-
-  // Clear Start ID
-  $('btnClear')?.addEventListener('click', () => {
-    runServer('Clear Start ID', 'server_clearStartId', [], 'Clearing start id…');
-  });
-
-  // Start Polling (from specific ID)
-  $('btnStart')?.addEventListener('click', () => {
-    const id = ($('startId')?.value || '').trim();
-    if (!/^\d{5,30}$/.test(id)) { writeStatus('invalid message id', 'err'); DBG.write('invalid message id'); return; }
-    runServer('Poll from ID', 'server_startPollingFrom', [id], 'Starting poll from ID…');
-  });
-
-  // Start Polling (from pointer)
-  $('btnStartPointer')?.addEventListener('click', () => {
-    runServer('Poll from pointer', 'server_startPolling', [], 'Starting poll from last pointer…');
-  });
-
-  // Post/Update Weekly Board
-  $('btnPost')?.addEventListener('click', () => {
-    runServer('Post/Update Weekly Board', 'server_postOrUpdate', [], 'Posting weekly board…');
-  });
-  $('btnResetIds').onclick = () => {
-    const secret = $('secret').value.trim();
-    if (!secret) { DBG.write('missing secret', 'err'); return; }
-    setBusy(true, 'Resetting stored IDs…');
-    google.script.run
-      .withSuccessHandler(res => {
-        if (res && res.ok !== false) {
-          const data = res.data || res; // supports _ok_ or plain payload
-          DBG.write('reset ok: ' + JSON.stringify(data), 'ok');
-        } else {
-          DBG.write(res && res.error ? res.error : 'reset failed', 'err');
-        }
-        setBusy(false);
-      })
-      .withFailureHandler(e => { DBG.write('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_resetWeeklyMsgIds(secret);
+    $('btnProbe').onclick = () => {
+    const secret = sanitizeSecretFieldValue($('secret').value);
+    if (!secret) { out('missing secret','err'); return; }
+    setBusy(true, 'Probing relay…'); out('▶ Probe Relay…');
+    google.script.run.withSuccessHandler(res => {
+      out(res.ok ? ('✅ Probe\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+      setBusy(false);
+    }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+    .server_probeRelay(secret);
   };
 
-  $('btnDeleteCluster').onclick = () => {
-    const secret = $('secret').value.trim();
-    if (!secret) { DBG.write('missing secret', 'err'); return; }
-    setBusy(true, 'Deleting weekly cluster…');
-    google.script.run
-      .withSuccessHandler(res => {
-        if (res && res.ok !== false) {
-          const data = res.data || res; // supports _ok_ or plain payload
-          DBG.write('deleted cluster: ' + JSON.stringify(data), 'ok');
-        } else {
-          DBG.write(res && res.error ? res.error : 'delete failed', 'err');
-        }
+    // Set Start ID
+    $('btnSet').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      const id = $('startId').value.trim();
+      if (!secret) { out('missing secret','err'); return; }
+      if (!/^\d{5,30}$/.test(id)) { out('invalid message id','err'); return; }
+      setBusy(true, 'Setting start id…'); out('▶ Set Start ID…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ set: ' + JSON.stringify(res.data)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
         setBusy(false);
-      })
-      .withFailureHandler(e => { DBG.write('script error: ' + e.message, 'err'); setBusy(false); })
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_setStartId(secret, id);
+    };
+
+    // Clear Start ID
+    $('btnClear').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Clearing start id…'); out('▶ Clear Start ID…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? '✅ cleared' : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_clearStartId(secret);
+    };
+
+    // Start Polling (inclusive)
+    $('btnStart').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      const id = $('startId').value.trim();
+      if (!secret) { out('missing secret','err'); return; }
+      if (!/^\d{5,30}$/.test(id)) { out('invalid message id','err'); return; }
+      setBusy(true, 'Polling from ID (inclusive)…'); out('▶ Start Polling from ID (inclusive)…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ ' + JSON.stringify(res.data)) : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_startPollingFrom(secret, id);
+    };
+
+    // Start Polling (from last pointer)
+    $('btnStartPointer').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Polling from last pointer…'); out('▶ Start Polling from last pointer…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ ' + JSON.stringify(res.data)) : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_startPolling(secret);
+    };
+
+    // Post / Update Weekly Board
+    $('btnPost').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Posting/updating weekly board…'); out('▶ Post/Update Weekly Board…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ done: ' + JSON.stringify(res.data)) : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_postOrUpdate(secret);
+    };
+
+    // Delete Weekly Cluster
+    $('btnDelete').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Deleting weekly cluster…'); out('▶ Delete Weekly Cluster…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? '✅ deleted' : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
       .server_deleteWeeklyCluster(secret);
-  };
+    };
 
-})();
-</script>
+    // Reset saved message IDs (header/weekly/rematches)
+    $('btnResetIds').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Resetting saved IDs…'); out('▶ Reset Saved IDs…');
+      // Try preferred name; fall back if you named it differently server-side
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok) out('✅ IDs reset', 'ok');
+        else out('❌ ' + (res && res.error), 'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_resetMsgIdsForCurrent(secret);
+    };
+
+    // Preview Tables
+    $('btnPreview').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Previewing…'); out('▶ Preview Tables…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ Preview Tables result\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_previewTables(secret);
+    };
+
+    // Week Meta
+    $('btnWeekMeta').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Fetching week meta…'); out('▶ Week Meta…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ Week Meta result\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_debugWeekMeta(secret);
+    };
+
+    // Team Index: Snapshot
+    $('btnIdxSnap').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      setBusy(true, 'Team index snapshot…'); out('▶ Team Index Snapshot…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ Team Index Snapshot\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_debugIndexSnapshot(secret, false);
+    };
+
+    // Team Index: Reset & Snapshot
+    $('btnIdxSnapReset').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('missing secret','err'); return; }
+      const reset = !!$('resetIdxCache').checked;
+      setBusy(true, 'Reset & snapshot…'); out('▶ Team Index Snapshot (reset=' + reset + ')…');
+      google.script.run.withSuccessHandler(res => {
+        out(res.ok ? ('✅ Team Index Snapshot\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_debugIndexSnapshot(secret, reset);
+    };
+
+    // Debug dock controls
+    $('dbgToggle').onclick = () => {
+      $('debugDock').classList.toggle('collapsed');
+      $('dbgToggle').textContent = $('debugDock').classList.contains('collapsed') ? 'Show' : 'Hide';
+    };
+    $('dbgCopy').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText($('debugOut').textContent);
+      } catch (e) {}
+    };
+    $('dbgClear').onclick = () => { $('debugOut').textContent = ''; };
+
+
+  </script>
 </body>
 </html>

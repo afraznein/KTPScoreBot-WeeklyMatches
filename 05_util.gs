@@ -4,6 +4,42 @@
 
 function ktpEmoji_() { return '<:ktp:' + KTP_EMOJI_ID + '>'; }
 
+function _normalizeWhitespace_(s) {
+  return String(s || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+}
+
+function _isJustPings_(s) {
+  // Heuristic: if after removing mentions/emojis we have almost nothing, treat as pings
+  var t = String(s || '')
+    .replace(/<[@#][!&]?\d+>/g, ' ')
+    .replace(/<:[a-z0-9_]+:\d+>/gi, ' ')
+    .replace(/:[a-z0-9_]+:/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return t.length < 3;
+}
+
+function _decStringMinusOne_(s) {
+  s = String(s || '').trim();
+  if (!/^\d+$/.test(s)) return null;
+  if (s === '0') return '0';
+
+  var arr = s.split('');
+  var i = arr.length - 1;
+  while (i >= 0) {
+    if (arr[i] === '0') {
+      arr[i] = '9';
+      i--;
+    } else {
+      arr[i] = String(arr[i].charCodeAt(0) - 1 - 48); // '0' -> 48
+      break;
+    }
+  }
+  // Remove leading zeros but keep at least one digit
+  var out = arr.join('').replace(/^0+/, '');
+  return out || '0';
+}
+
 // ----- DATE & TIME HELPERS -----
 /** Parse a Date from text like "9/28", "09-28-2025", or "Sep 28". */
 function parseDateFromText_(text, refYear) {
@@ -127,6 +163,9 @@ function idFromRelay_(resp) {
   return null;
 }
 
+// ----- HASH HELPERS -----
+function _hashString_(s) { return sha256Hex_(String(s || '')); }
+
 /**
  * Compute a SHA-256 hash (hex string) of a string or object.
  * - If you pass a non-string, it will JSON.stringify it first.
@@ -155,6 +194,80 @@ function _safeHeaderHash_(h) {
   } catch (e) {
     return sha256Hex_(String(h || ''));
   }
+}
+
+// Hash embeds without footer noise (like _safeHeaderHash_)
+function _safeEmbedsHash_(embeds) {
+  try {
+    var x = JSON.parse(JSON.stringify(embeds || []));
+    if (x && x.length) {
+      for (var i=0;i<x.length;i++) {
+        if (x[i] && x[i].footer) delete x[i].footer;
+      }
+    }
+    return sha256Hex_(x);
+  } catch (e) {
+    return sha256Hex_(String(embeds || ''));
+  }
+}
+
+// ----- CACHING HELPERS -----
+
+function cache_(){ return CacheService.getScriptCache(); }
+
+function cacheGetJson_(key){
+  const s = cache_().get(key);
+  if (!s) return null;
+  try { return JSON.parse(s); } catch(e){ return null; }
+}
+
+function cachePutJson_(key, obj, ttlSec){
+  cache_().put(key, JSON.stringify(obj||{}), Math.min(21600, Math.max(30, ttlSec||300)));
+}
+
+/**
+ * Convert a big tables body (multiple code-fenced sections) into
+ * one or more embeds for a single Discord message.
+ *
+ * Strategy: split on blank lines between sections, pack sections into
+ * chunks <= ~3900 chars, preserving the existing ``` fences inside sections.
+ */
+function _tablesBodyToEmbeds_(body) {
+  var MAX = 3900; // under 4096 to allow small headroom
+  var parts = String(body || '').split(/\n{2,}/); // split on blank lines
+  var embeds = [];
+  var cur = '';
+
+  for (var i = 0; i < parts.length; i++) {
+    var seg = parts[i];
+    var candidate = cur ? (cur + '\n\n' + seg) : seg;
+    if (candidate.length > MAX) {
+      if (cur) {
+        embeds.push({ type: 'rich', description: cur, color: 0x2b6cb0 });
+        cur = seg; // start new
+      } else {
+        // very long single segment; hard split by lines
+        var lines = seg.split('\n');
+        var buf = '';
+        for (var j=0;j<lines.length;j++){
+          var ln = lines[j];
+          if ((buf + (buf ? '\n' : '') + ln).length > MAX) {
+            embeds.push({ type:'rich', description: buf, color: 0x2b6cb0 });
+            buf = ln;
+          } else {
+            buf = buf ? (buf + '\n' + ln) : ln;
+          }
+        }
+        if (buf) embeds.push({ type:'rich', description: buf, color: 0x2b6cb0 });
+        cur = '';
+      }
+    } else {
+      cur = candidate;
+    }
+  }
+  if (cur) embeds.push({ type: 'rich', description: cur, color: 0x2b6cb0 });
+
+  return embeds;
 }
 
 

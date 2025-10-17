@@ -4,55 +4,105 @@
 
 // ---------- RELAY HTTP CORE ----------
 
-/** Low-level helper to call the Cloud Run relay API with retries and backoff. */
-function relayRequest_(path, method, bodyObj, opts) {
-  opts = opts || {};
-  const timeoutMs = opts.timeoutMs || 30000;
-  const maxRetries = (opts.retries != null) ? opts.retries : 2;
-  const url = RELAY_BASE + String(path || '');
-  const payload = bodyObj != null ? JSON.stringify(bodyObj) : null;
-  const params = {
-    method: String(method || 'get').toLowerCase(),
-    headers: { 'X-Relay-Auth': RELAY_AUTH },
-    muteHttpExceptions: true
+/* =========================
+   Relay base / headers / fetch
+   ========================= */
+/** Script Property helper */
+function _sp_(k, dflt) {
+  var v = PropertiesService.getScriptProperties().getProperty(k);
+  return (v != null && v !== '') ? String(v) : (dflt == null ? '' : String(dflt));
+}
+
+/** Relay base URL (no trailing slash) */
+function getRelayBase_() {
+  var cands = [
+    _sp_('RELAY_BASE'),
+    _sp_('DISCORD_RELAY_BASE'),
+    _sp_('WM_RELAY_BASE_URL'),
+    (typeof RELAY_BASE       !== 'undefined' ? RELAY_BASE       : ''),
+    (typeof DISCORD_RELAY_BASE   !== 'undefined' ? DISCORD_RELAY_BASE   : ''),
+    (typeof WM_RELAY_BASE_URL    !== 'undefined' ? WM_RELAY_BASE_URL    : '')
+  ];
+  for (var i=0;i<cands.length;i++){
+    var v = String(cands[i] || '').trim();
+    if (v) { if (v.endsWith('/')) v = v.slice(0,-1); return v; }
+  }
+  throw new Error('Relay base URL missing (set RELAY_BASE).');
+}
+
+function getRelayPaths_() {
+  var paths = {
+    messages: _sp_('RELAY_PATH_MESSAGES', '/messages'),
+    message : _sp_('RELAY_PATH_MESSAGE' , '/message'),     // used as /message/:channelId/:messageId
+    reply   : _sp_('RELAY_PATH_REPLY'   , '/reply'),       // your server.js
+    post    : _sp_('RELAY_PATH_POST'    , '/reply'),       // synonym (old code may use "post")
+    edit    : _sp_('RELAY_PATH_EDIT'    , '/edit'),
+    del     : _sp_('RELAY_PATH_DELETE'  , '/delete'),      // used as /delete/:channelId/:messageId
+    dm      : _sp_('RELAY_PATH_DM'      , '/dm'),
+    react   : _sp_('RELAY_PATH_REACT'   , '/react'),
+    health  : _sp_('RELAY_PATH_HEALTH'  , '/health'),
+    whoami  : _sp_('RELAY_PATH_WHOAMI'  , '/whoami')
   };
-  if (payload != null) {
-    params.contentType = 'application/json';
-    params.payload = payload;
+  return paths;
+}
+
+/** Build headers for talking to the relay (adds shared secret in common formats). */
+function getRelayHeaders_() {
+  var secret =
+    _sp_('RELAY_AUTH') ||
+    _sp_('WM_RELAY_SHARED_SECRET') ||
+    (typeof RELAY_AUTH    !== 'undefined' ? RELAY_AUTH    : '') ||
+    (typeof WM_RELAY_SHARED_SECRET !== 'undefined' ? WM_RELAY_SHARED_SECRET : '');
+  var h = { 'Content-Type': 'application/json' };
+  if (secret) h['X-Relay-Auth'] = String(secret);  // your server.js expects this
+  return h;
+}
+
+/** Normalize a path/URL. Accepts absolute URLs or relative paths. */
+function _normalizeRelayUrl_(path) {
+  if (typeof path !== 'string' || !path) {
+    throw new Error('relayFetch_: path is missing or not a string');
   }
-  // Helper to parse numeric or HTTP-date Retry-After header
-  function parseRetryAfter(h) {
-    const n = Number(h);
-    if (isFinite(n)) return Math.min(n * 1000, 60000);
-    const t = Date.parse(h);
-    if (isFinite(t)) {
-      const d = t - Date.now();
-      return Math.min(Math.max(d, 0), 60000);
-    }
-    return null;
+  // If caller passed a full URL, use as-is
+  if (/^https?:\/\//i.test(path)) return path;
+  var base = getRelayBase_();
+  return base + (path.charAt(0) === '/' ? path : ('/' + path));
+}
+
+
+/** Optional: central place to tune timeouts for relay calls. */
+function getRelayTimeoutMs_() {
+  // Default 20s; adjust if your Cloud Run/Functions are slower
+  var sp = PropertiesService.getScriptProperties();
+  var v = sp.getProperty('RELAY_TIMEOUT_MS');
+  var n = v ? parseInt(v, 10) : 20000;
+  return isNaN(n) ? 20000 : Math.max(5000, n);
+}
+
+/** Fetch wrapper */
+function relayFetch_(path, opt) {
+  opt = opt || {};
+  var url = _normalizeRelayUrl_(path);
+
+  var params = {
+    method: (opt.method || 'get').toLowerCase(),
+    headers: Object.assign({}, getRelayHeaders_(), (opt.headers || {})),
+    muteHttpExceptions: true,
+    timeout: (function(){ var n = parseInt(_sp_('RELAY_TIMEOUT_MS','20000'),10); return isNaN(n)?20000:Math.max(5000,n); })()
+  };
+
+  if (opt.method && /post|put|patch|delete/i.test(opt.method) && typeof opt.payload !== 'undefined') {
+    params.payload = (typeof opt.payload === 'string') ? opt.payload : JSON.stringify(opt.payload);
+    if (!params.headers['Content-Type']) params.headers['Content-Type'] = 'application/json';
   }
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const res = UrlFetchApp.fetch(url, Object.assign({ timeout: timeoutMs }, params));
-      const code = res.getResponseCode();
-      if (code === 429 || code >= 500) {
-        const retryAfter = (res.getHeaders() || {})['Retry-After'];
-        const waitMs = parseRetryAfter(retryAfter) || (600 * Math.pow(2, attempt));
-        if (attempt === maxRetries) {
-          return { ok: false, code: code, text: res.getContentText() || '' };
-        }
-        Utilities.sleep(waitMs);
-        continue;
-      }
-      return { ok: (code >= 200 && code < 300), code: code, text: res.getContentText() || '' };
-    } catch (e) {
-      if (attempt === maxRetries) {
-        return { ok: false, code: 0, text: String(e) };
-      }
-      Utilities.sleep(600 * Math.pow(2, attempt));
-    }
+
+  var res = UrlFetchApp.fetch(url, params);
+  var code = res.getResponseCode();
+  var body = res.getContentText() || '';
+  if (code < 200 || code >= 300) {
+    throw new Error('relayFetch_ HTTP ' + code + ' for ' + url + ': ' + body);
   }
-  return { ok: false, code: 0, text: 'relayRequest_ failed' };
+  try { return JSON.parse(body); } catch(_){ return body; }
 }
 
 /** Parse JSON text safely (returns null on failure). */
@@ -63,149 +113,245 @@ function tryParseJson_(s) {
 
 // ---------- RELAY API WRAPPERS ----------
 
-/** Fetch a single message by ID via relay. */
-function fetchSingleMessage_(channelId, messageId) {
-  const r = relayRequest_(`/message/${encodeURIComponent(channelId)}/${encodeURIComponent(messageId)}`, 'get');
-  if (!r.ok) {
-    logLocal_('WARN', 'fetchSingleMessage_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return null;
+function handleIncomingDiscordEvent_(payload) {
+  var text = contentFromRelay_(payload);
+  if (!text) return { ok:false, error:'empty' };
+
+  var parsed = parseScheduleMessage_v3(text); // your parser
+  if (!parsed.ok) return parsed;
+
+  // group by wkKey and update
+  var groups = {};
+  parsed.pairs.forEach(function(p){ (groups[p.weekKey] = groups[p.weekKey] || []).push(p); });
+  for (var wk in groups) {
+    updateTablesMessageFromPairs_(wk, groups[wk]);
   }
-  return tryParseJson_(r.text);
+  return { ok:true };
 }
 
-/** Fetch recent messages from a channel (if `afterId` provided, fetch after that). */
-function fetchChannelMessages_(channelId, afterId) {
-  const path = '/messages?channelId=' + encodeURIComponent(channelId) + (afterId ? '&after=' + encodeURIComponent(afterId) : '');
-  const r = relayRequest_(path, 'get');
-  if (!r.ok) {
-    logLocal_('WARN', 'fetchChannelMessages_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return [];
+function contentFromRelay_(payload) {
+  if (payload == null) return '';
+
+  // Fast path: already a string
+  if (typeof payload === 'string') return _normalizeWhitespace_(payload);
+
+  // Try common wrappers
+  var msg = payload;
+  if (msg.message && typeof msg.message === 'object') msg = msg.message;
+  else if (msg.data && typeof msg.data === 'object') msg = msg.data;
+  else if (msg.d && typeof msg.d === 'object') msg = msg.d; // gateway-style
+
+  // 1) Direct content
+  var parts = [];
+  if (msg.content && typeof msg.content === 'string') {
+    parts.push(msg.content);
   }
-  return tryParseJson_(r.text) || [];
+
+  // 2) Embeds (title/description/fields) if no or minimal content
+  if ((!parts.length || _isJustPings_(parts.join(' '))) && Array.isArray(msg.embeds) && msg.embeds.length) {
+    parts.push(_textFromEmbeds_(msg.embeds));
+  }
+
+  // 3) Referenced (reply) message content, if present
+  var ref = msg.referenced_message || (msg.message && msg.message.referenced_message);
+  if ((!parts.length || _isJustPings_(parts.join(' '))) && ref && typeof ref.content === 'string') {
+    parts.push(ref.content);
+  }
+
+  // 4) Fallback to any “clean_content” style fields if your relay provides them
+  if (!parts.length && typeof msg.clean_content === 'string') {
+    parts.push(msg.clean_content);
+  }
+
+  // 5) If still nothing, try attachments names as a hint (rarely useful for scheduling)
+  if (!parts.length && Array.isArray(msg.attachments) && msg.attachments.length) {
+    var names = msg.attachments.map(function(a){ return a && a.filename ? a.filename : ''; })
+                               .filter(Boolean)
+                               .join(' ');
+    if (names) parts.push(names);
+  }
+
+  // 6) Final normalize
+  var text = _normalizeWhitespace_(parts.filter(Boolean).join('\n').trim());
+
+  // Strip common noise that often slips through relays; keep it *light*
+  text = text.replace(/<[@#][!&]?\d+>/g, ' ')      // <@123>, <@!123>, <#123>, <@&role>
+             .replace(/<:[a-z0-9_]+:\d+>/gi, ' ')  // <:emoji:12345>
+             .replace(/:[a-z0-9_]+:/gi, ' ');      // :emoji:
+
+  return _normalizeWhitespace_(text);
 }
 
-/** Post a simple text message to a channel. Returns the new message ID or ''. */
-function postChannelMessage_(channelId, content) {
-  const body = { channelId: String(channelId), content: String(content || '') };
-  const r = relayRequest_('/reply', 'post', body);
-  if (!r.ok) {
-    logLocal_('WARN', 'postChannelMessage_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return '';
+/** Process one Discord message through: content → parse → update */
+function _processOneDiscordMessage_(rawMsg) {
+  var text = (typeof contentFromRelay_ === 'function') ? contentFromRelay_(rawMsg) : (rawMsg && rawMsg.content) || '';
+  if (!text) return { updated: 0 };
+
+  var parsed = (typeof parseScheduleMessage_v3 === 'function') ? parseScheduleMessage_v3(text) : null;
+  if (!parsed || !parsed.ok || !parsed.pairs || !parsed.pairs.length) {
+    return { updated: 0 };
   }
-  const j = tryParseJson_(r.text);
-  return (j && j.id) ? String(j.id) : '';
+
+  // Group pairs by weekKey and update each
+  var updated = 0;
+  var byWk = {};
+  for (var i=0;i<parsed.pairs.length;i++){
+    var p = parsed.pairs[i];
+    var key = p.weekKey || '';
+    (byWk[key] = byWk[key] || []).push(p);
+  }
+  for (var wk in byWk) {
+    try {
+      var u = (typeof updateTablesMessageFromPairs_ === 'function') ? updateTablesMessageFromPairs_(wk, byWk[wk]) : null;
+      if (u && u.updated) updated += u.updated;
+    } catch (e) {
+      // don’t throw; continue
+    }
+  }
+  return { updated: updated };
 }
 
-/** Edit a message's content by ID. Returns true on success. */
-function editChannelMessage_(channelId, messageId, content) {
-  const body = { channelId: String(channelId), messageId: String(messageId), content: String(content || '') };
-  const r = relayRequest_('/edit', 'post', body);
-  if (!r.ok) {
-    logLocal_('WARN', 'editChannelMessage_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return false;
+/* ----------------------- helpers ----------------------- */
+function _textFromEmbeds_(embeds) {
+  var out = [];
+  for (var i=0; i<embeds.length; i++) {
+    var e = embeds[i] || {};
+    if (e.title)       out.push(String(e.title));
+    if (e.description) out.push(String(e.description));
+    if (Array.isArray(e.fields)) {
+      for (var j=0; j<e.fields.length; j++) {
+        var f = e.fields[j] || {};
+        // Concatenate name + value, since some relays put content in fields
+        var line = [f.name, f.value].filter(Boolean).join(': ');
+        if (line) out.push(String(line));
+      }
+    }
+    if (e.footer && e.footer.text) {
+      // footers often include “edited” or timestamps; usually not useful → skip
+    }
   }
-  return true;
+  return out.filter(Boolean).join('\n').trim();
 }
 
-/** Post an embed (and optional content) to a channel. Returns new message ID or ''. */
-function postChannelEmbed_(channelId, embeds, content) {
-  const body = { channelId: String(channelId), embeds: embeds || [] };
-  if (content != null) body.content = String(content);
-  const r = relayRequest_('/reply', 'post', body);
-  if (!r.ok) {
-    logLocal_('WARN', 'postChannelEmbed_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return '';
-  }
-  const j = tryParseJson_(r.text);
-  return (j && j.id) ? String(j.id) : '';
-}
+/* ----------------------- Fetch ----------------------- */
 
-/** Edit a message's embeds (and content). Returns true on success. */
-function editChannelEmbed_(channelId, messageId, embeds, content) {
-  const body = { channelId: String(channelId), messageId: String(messageId), embeds: embeds || [] };
-  if (content != null) body.content = String(content);
-  const r = relayRequest_('/edit', 'post', body);
-  if (!r.ok) {
-    logLocal_('WARN', 'editChannelEmbed_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return false;
+function _fetchSingleMessageInclusive_(channelId, messageId) {
+  // 1) Try a dedicated single-message endpoint
+  if (typeof fetchMessageById_ === 'function') {
+    try {
+      var m = fetchMessageById_(channelId, messageId);
+      if (m && m.id) return m;
+    } catch (e) {}
   }
-  return true;
-}
 
-/** Delete a message by ID. Returns true on success. */
-function deleteMessage_(channelId, messageId) {
-  const path = '/delete/' + encodeURIComponent(channelId) + '/' + encodeURIComponent(messageId);
-  const r = relayRequest_(path, 'delete');
-  if (!r.ok) {
-    logLocal_('WARN', 'deleteMessage_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return false;
-  }
-  return true;
-}
-
-/** Add a reaction emoji to a message. */
-function postReaction_(channelId, messageId, emoji) {
-  const body = { channelId: String(channelId), messageId: String(messageId), emoji: String(emoji) };
-  const r = relayRequest_('/react', 'post', body);
-  if (!r.ok) {
-    logLocal_('WARN', 'postReaction_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return false;
-  }
-  return true;
-}
-
-// ---------- DIRECT MESSAGING & REACTIONS ----------
-
-/** Send a DM to a user. Returns the message ID or ''. */
-function postDM_(userId, content) {
-  const body = { userId: String(userId), content: String(content || '') };
-  const r = relayRequest_('/dm', 'post', body);
-  if (!r.ok) {
-    logLocal_('WARN', 'postDM_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return '';
-  }
-  const j = tryParseJson_(r.text);
-  return (j && j.id) ? String(j.id) : '';
-}
-
-/** Advanced: Post a message with content and optional embeds directly (returns ID or null). */
-function postChannelMessageAdvanced_(channelId, content, embeds) {
-  const res = UrlFetchApp.fetch(`${RELAY_BASE}/reply`, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { 'X-Relay-Auth': RELAY_AUTH },
-    payload: JSON.stringify({
-      channelId: String(channelId),
-      content: String(content || ''),
-      ...(embeds && embeds.length ? { embeds: embeds } : {})
-    }),
-    muteHttpExceptions: true
-  });
-  const code = res.getResponseCode();
-  if (code >= 300) {
-    logLocal_('WARN', 'postChannelMessageAdvanced_ failed', { code: code, body: (res.getContentText() || '').slice(0, 400) });
-    return null;
-  }
+  // 2) Try "around" if your relay supports it
   try {
-    const j = JSON.parse(res.getContentText() || '{}');
-    return String(j.id || '');
-  } catch (e) {
-    return null;
-  }
+    var aroundPage = fetchChannelMessages_(channelId, { around: String(messageId), limit: 1 }) || [];
+    for (var i = 0; i < aroundPage.length; i++) {
+      if (String(aroundPage[i].id) === String(messageId)) return aroundPage[i];
+    }
+  } catch (e) {}
+
+  // 3) Last resort: fetch "after = (messageId - 1)" using string arithmetic
+  try {
+    var prev = _decStringMinusOne_(String(messageId));
+    if (prev) {
+      var maybe = fetchChannelMessages_(channelId, { after: prev, limit: 1 }) || [];
+      for (var j = 0; j < maybe.length; j++) {
+        if (String(maybe[j].id) === String(messageId)) return maybe[j];
+      }
+    }
+  } catch (e) {}
+
+  return null;
 }
 
-/** Advanced: Edit a message's content and/or embeds directly (returns true on success). */
-function editChannelMessageAdvanced_(channelId, messageId, content, embeds) {
-  const body = { channelId: String(channelId), messageId: String(messageId) };
-  if (content != null) body.content = String(content);
-  if (embeds != null) body.embeds = embeds;
-  const r = relayRequest_('/edit', 'post', body);
-  if (!r.ok) {
-    logLocal_('WARN', 'editChannelMessageAdvanced_ failed', { code: r.code, text: (r.text || '').slice(0, 200) });
-    return false;
-  }
-  return true;
+function fetchChannelMessages_(channelId, params) {
+  params = params || {};
+  var p = getRelayPaths_();
+  var qs = 'channelId=' + encodeURIComponent(channelId);
+  if (params.after)  qs += '&after='  + encodeURIComponent(params.after);
+  if (params.around) qs += '&around=' + encodeURIComponent(params.around);
+  if (params.limit)  qs += '&limit='  + encodeURIComponent(params.limit);
+  return relayFetch_(p.messages + '?' + qs, { method:'get' }) || [];
 }
+
+function fetchMessageById_(channelId, messageId) {
+  var p = getRelayPaths_();
+  var path = (p.message || '/message') + '/' + encodeURIComponent(channelId) + '/' + encodeURIComponent(messageId);
+  var obj = relayFetch_(path, { method:'get' });
+  return (obj && obj.id) ? obj : null;
+}
+
+/* ----------------------- Post ----------------------- */
+
+/** POST text message */
+function postChannelMessage_(channelId, content) {
+  var p = getRelayPaths_();
+  var path = p.reply || p.post || '/reply';
+  var payload = { channelId: String(channelId), content: String(content || '') };
+  var res = relayFetch_(path, { method:'post', payload: payload }) || {};
+  var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
+  if (!id) try { logLocal_('WARN','postChannelMessage_ no id', {res:res}); } catch(_){}
+  return id;
+}
+
+function postChannelMessageAdvanced_(channelId, content, embeds) {
+  var p = getRelayPaths_();
+  var path = p.reply || p.post || '/reply';
+  var payload = { channelId: String(channelId), content: String(content || ''), embeds: embeds || [] };
+  var res = relayFetch_(path, { method:'post', payload: payload }) || {};
+  var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
+  if (!id) try { logLocal_('WARN','postChannelMessageAdvanced_ no id', {res:res}); } catch(_){}
+  return id;
+}
+
+/* ----------------------- Edit ----------------------- */
+function editChannelMessage_(channelId, messageId, newContent) {
+  var p = getRelayPaths_();
+  var path = p.edit || '/edit';
+  var payload = { channelId: String(channelId), messageId: String(messageId), content: String(newContent || '') };
+  var res = relayFetch_(path, { method:'post', payload: payload }) || {};
+  var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
+  return id || String(messageId);
+}
+
+function editChannelMessageAdvanced_(channelId, messageId, content, embeds) {
+  var p = getRelayPaths_();
+  var path = p.edit || '/edit';
+  var payload = { channelId: String(channelId), messageId: String(messageId), content: String(content || ''), embeds: embeds || [] };
+  var res = relayFetch_(path, { method:'post', payload: payload }) || {};
+  var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
+  return id || String(messageId);
+}
+
+/* ----------------------- Delete ----------------------- */
+function deleteMessage_(channelId, messageId) {
+  var p = getRelayPaths_();
+  var base = p.del || '/delete';
+  var path = base + '/' + encodeURIComponent(channelId) + '/' + encodeURIComponent(messageId);
+  var res = relayFetch_(path, { method:'delete' }) || {};
+  return !(res && res.ok === false);
+}
+
+function postReaction_(channelId, messageId, emoji) {
+  var p = getRelayPaths_();
+  var path = p.react || '/react';
+  var payload = { channelId: String(channelId), messageId: String(messageId), emoji: String(emoji) };
+  var res = relayFetch_(path, { method:'post', payload: payload }) || {};
+  return (res && res.ok === false) ? false : true;
+}
+
+function postDM_(userId, content) {
+  var p = getRelayPaths_();
+  var path = p.dm || '/dm';
+  var payload = { userId: String(userId), content: String(content || '') };
+  var res = relayFetch_(path, { method:'post', payload: payload }) || {};
+  var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
+  if (!id) try { logLocal_('WARN','postDM_ no id', {res:res}); } catch(_){}
+  return id || '';
+}
+
 
 // ---------- LOGGING & NOTIFICATIONS ----------
 

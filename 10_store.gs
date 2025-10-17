@@ -35,59 +35,71 @@ function matchKey_(division, team1, team2) {
   return `${division}|${a}|${b}`;
 }
 
-/** Property key for storing Discord message IDs for a given week key */
-function _msgIdsKey_(wk) {
-  return 'WEEKLY_MSG_IDS::' + String(wk || '');
-}
+function _msgIdsKey_(wk){ return 'WEEKLY_MSG_IDS::' + String(wk || ''); }
 
-/** Load stored IDs for this week (back-compatible with old shapes) */
+/** Load IDs with full back-compat and normalize into a single shape. */
 function _loadMsgIds_(wk) {
   var raw = PropertiesService.getScriptProperties().getProperty(_msgIdsKey_(wk));
-  var obj;
-  try { obj = JSON.parse(raw || '{}'); } catch (e) { obj = {}; }
+  var obj = raw ? (function(){ try { return JSON.parse(raw); } catch(_) { return null; } })() : null;
+  if (!obj) obj = {};
 
-  var header = obj.header || '';
-  var table  = obj.table  || '';
-  var tables = Array.isArray(obj.tables) ? obj.tables
-             : Array.isArray(obj.cluster) ? obj.cluster.slice(1)
-             : (table ? [table] : []);
+  // Normalize expected fields
+  var header    = obj.header    ? String(obj.header)    : '';
+  var table     = obj.table     ? String(obj.table)     : '';
+  var rematch   = obj.rematch   ? String(obj.rematch)   : '';
 
-  if (!table && tables.length) table = tables[0];
+  var tables    = Array.isArray(obj.tables)    ? obj.tables.map(String)    : [];
+  var rematches = Array.isArray(obj.rematches) ? obj.rematches.map(String) : [];
 
-  return { header: header, table: table, tables: tables };
+  // Back-compat: legacy 'cluster' = [header, ...tables]
+  if ((!header || !tables.length) && Array.isArray(obj.cluster)) {
+    var c = obj.cluster.map(String);
+    if (!header && c.length) header = c[0] || header;
+    if (!tables.length && c.length > 1) tables = c.slice(1);
+  }
+  // If single table present but no tables[], reflect it
+  if (table && !tables.length) tables = [table];
+  // If single rematch present but no rematches[], reflect it
+  if (rematch && !rematches.length) rematches = [rematch];
+
+  return {
+    header: header,
+    table:  table,           // single weekly table (preferred new shape)
+    tables: tables,          // legacy multi-page tables (kept for back-compat)
+    rematch: rematch,        // single rematches post (preferred new shape)
+    rematches: rematches     // legacy multi-post rematches (if any)
+  };
 }
 
-/** Save IDs in a normalized way, plus legacy 'cluster' for safety */
+/** Save IDs in both new and legacy-friendly shapes. */
 function _saveMsgIds_(wk, ids) {
-  var header = ids.header || '';
-  var table  = ids.table  || ((Array.isArray(ids.tables) && ids.tables[0]) || '');
-  var tables = table ? [table] : [];
-  var obj = { header: header, table: table, tables: tables, cluster: [header].concat(tables) };
-  PropertiesService.getScriptProperties().setProperty(_msgIdsKey_(wk), JSON.stringify(obj));
-  return obj;
+  var out = {
+    header: String(ids.header || ''),
+    table:  String(ids.table  || ''),
+    rematch: String(ids.rematch || ''),
+    tables:  Array.isArray(ids.tables)    ? ids.tables.map(String)    : (ids.table ? [String(ids.table)] : []),
+    rematches: Array.isArray(ids.rematches) ? ids.rematches.map(String) : (ids.rematch ? [String(ids.rematch)] : [])
+  };
+  // Legacy cluster: [header, ...tables]
+  out.cluster = [out.header].concat(out.tables);
+  PropertiesService.getScriptProperties().setProperty(_msgIdsKey_(wk), JSON.stringify(out));
+  return out;
 }
 
-/** Clear stored IDs for a week key */
 function _clearMsgIds_(wk) {
   PropertiesService.getScriptProperties().deleteProperty(_msgIdsKey_(wk));
 }
 
-/** Delete the stored header/table messages on Discord, then clear IDs */
 function deleteWeeklyClusterByKey_(wk) {
   var ids = _loadMsgIds_(wk);
-  var channelId = PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID') || (typeof WEEKLY_POST_CHANNEL_ID !== 'undefined' ? WEEKLY_POST_CHANNEL_ID : '');
+  var channelId = PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID') ||
+                  (typeof WEEKLY_POST_CHANNEL_ID !== 'undefined' ? WEEKLY_POST_CHANNEL_ID : '');
   if (!channelId) throw new Error('WEEKLY_POST_CHANNEL_ID missing');
 
-  if (ids.header) { try { deleteMessage_(channelId, ids.header); } catch (e) {} }
-  if (ids.table)  { try { deleteMessage_(channelId, ids.table);  } catch (e) {} }
+  if (ids.header)    { try { deleteMessage_(channelId, ids.header); }    catch(e){} }
+  if (ids.weekly)    { try { deleteMessage_(channelId, ids.weekly); }    catch(e){} }
+  if (ids.rematches) { try { deleteMessage_(channelId, ids.rematches); } catch(e){} }
 
-  // safety: remove any extra stale tables from old runs
-  if (Array.isArray(ids.tables)) {
-    for (var i = 1; i < ids.tables.length; i++) {
-      var mid = ids.tables[i];
-      if (mid) { try { deleteMessage_(channelId, mid); } catch (e) {} }
-    }
-  }
   _clearMsgIds_(wk);
   return true;
 }

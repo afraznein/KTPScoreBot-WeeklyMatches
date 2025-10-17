@@ -1,74 +1,68 @@
 // =======================
 // scheduler.gs – Polling and scheduling functions
 // =======================
+function _pollAndProcessFromId_(channelId, startId, opt) {
+  opt = opt || {};
+  var inclusive = !!opt.inclusive;
 
-/** Main polling loop: fetch new schedule messages, parse them, and update store. */
-function WM_pollScheduling() {
-  const startTime = Date.now();
-  const sp = PropertiesService.getScriptProperties();
-  const lastId = sp.getProperty(LAST_SCHED_KEY) || '';  // last processed schedule message ID
+  var processed = 0;
+  var updatedPairs = 0;
+  var errors = [];
+  var lastId = startId ? String(startId) : '';
 
-  // Warm up caches if available
-  const week = getAlignedUpcomingWeekOrReport_();
-  const weekKey = week.weekKey || '';
-  const teamMap = getCanonicalTeamMap_();  // ensure team map cached
-
-  // Pull new schedule messages (after the last seen ID, if any)
-  const messages = fetchChannelMessages_(SCHED_INPUT_CHANNEL_ID, lastId) || [];
-  if (!messages.length) {
-    return { ok: true, lastPointer: lastId, tookMs: Date.now() - startTime };
-  }
-
-  // Sort messages by ID (ascending chronological order)
-  messages.sort((a, b) => compareSnowflakes(a.id, b.id));
-  const schedulesStore = {};
-  let updatedLastId = lastId;
-
-  for (const msg of messages) {
-    const msgId = String(msg.id);
-    if (compareSnowflakes(msgId, lastId) <= 0) continue;
-    updatedLastId = maxSnowflake(updatedLastId, msgId);
-    const content = contentFromRelay_(msg);
-    if (!content) continue;
-    // Determine division (from channel name or mention in content)
-    let division = '';
+  // 0) If inclusive: try to fetch/process the start message itself
+  if (inclusive && startId) {
     try {
-      const chanName = (msg.channel && msg.channel.name) || '';
-      division = canonDivision_(chanName);
-    } catch (e) {}
-    // Parse schedule message content
-    const result = parseScheduleMessage_(content, division);
-    if (result && Array.isArray(result.pairs)) {
-      for (const pair of result.pairs) {
-        const div = pair.division || division || '(unknown)';
-        schedulesStore[div] = schedulesStore[div] || [];
-        schedulesStore[div].push({
-          home: pair.home,
-          away: pair.away,
-          homeScore: null, awayScore: null,
-          homeWin: undefined, awayWin: undefined
-        });
+      var msg0 = _fetchSingleMessageInclusive_(channelId, String(startId)); // best-effort
+      if (msg0) {
+        var res0 = _processOneDiscordMessage_(msg0);
+        processed++;
+        if (res0 && res0.updated) updatedPairs += res0.updated;
+        lastId = String(msg0.id || lastId);
       }
+    } catch (e) {
+      errors.push('inclusive fetch failed: ' + String(e && e.message || e));
     }
   }
 
-  // Save parsed schedules to week store
-  const store = loadWeekStore_(weekKey);
-  store.schedules = schedulesStore;
-  saveWeekStore_(weekKey, store);
-  // Update last seen message ID pointer
-  sp.setProperty(LAST_SCHED_KEY, updatedLastId);
+  // 1) Now walk forward “after” the (possibly same) startId
+  var cursor = startId || lastId || '';
+  var pageLimit = 100; // how many to fetch per page (relay dependent)
+  var loops = 0, SAFETY = 50; // don’t infinite-loop
 
-  return { ok: true, lastPointer: updatedLastId, tookMs: Date.now() - startTime };
-}
+  while (loops++ < SAFETY) {
+    var page = [];
+    try {
+      // Your relay uses `after` semantics: returns messages with id > after
+      page = fetchChannelMessages_(channelId, { after: cursor, limit: pageLimit }) || [];
+    } catch (e) {
+      errors.push('fetch page failed: ' + String(e && e.message || e));
+      break;
+    }
+    if (!page.length) break;
 
-/** A locked version of WM_pollScheduling using LockService (to avoid concurrent execution). */
-function WM_pollScheduling_locked() {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) throw new Error('Could not obtain lock for WM_pollScheduling');
-  try {
-    return WM_pollScheduling();
-  } finally {
-    lock.releaseLock();
+    // Ensure chronological (Discord often returns newest first)
+    page.sort(function(a,b){ return BigInt(a.id) < BigInt(b.id) ? -1 : 1; });
+
+    for (var i=0; i<page.length; i++) {
+      var msg = page[i];
+      try {
+        var res = _processOneDiscordMessage_(msg);
+        processed++;
+        if (res && res.updated) updatedPairs += res.updated;
+        lastId = String(msg.id || lastId);
+      } catch (e) {
+        errors.push('process '+String(msg && msg.id)+': '+String(e && e.message || e));
+      }
+    }
+    // advance cursor to last processed id
+    cursor = lastId;
+    // If fewer than pageLimit, we reached the end
+    if (page.length < pageLimit) break;
   }
+
+  // 2) Persist last pointer
+  if (lastId) _setPointer_(lastId);
+
+  return { processed:processed, updatedPairs:updatedPairs, errors:errors, lastPointer:lastId };
 }
