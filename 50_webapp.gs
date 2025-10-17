@@ -52,13 +52,13 @@ function _getAllowedSecrets_() {
       var gv = _sanitizeSecretInput_(WM_WEBAPP_SHARED_SECRET);
       if (gv) out.push(gv);
     }
-  } catch (_) {}
+  } catch (_) { }
   try {
     if (typeof WEBAPP_SECRET !== 'undefined') {
       var gv2 = _sanitizeSecretInput_(WEBAPP_SECRET);
       if (gv2) out.push(gv2);
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // de-dupe
   var uniq = {};
@@ -101,7 +101,7 @@ function _secretFromRequest_(e) {
       const body = JSON.parse(e.postData.contents || '{}');
       if (body && body.secret) return String(body.secret);
     }
-  } catch (ignore) {}
+  } catch (ignore) { }
   return '';
 }
 
@@ -146,11 +146,11 @@ function server_clearStartId(secret) {
 function server_verifySecrets() {
   try {
     var sp = PropertiesService.getScriptProperties();
-    var keys = ['WM_WEBAPP_SHARED_SECRET','WEBAPP_SECRET','WEBAPP_SECRET_V2','RELAY_SHARED_SECRET','PANEL_SECRET','DEV_MODE','SECRET_DEV'];
+    var keys = ['WM_WEBAPP_SHARED_SECRET', 'WEBAPP_SECRET', 'WEBAPP_SECRET_V2', 'RELAY_SHARED_SECRET', 'PANEL_SECRET', 'DEV_MODE', 'SECRET_DEV'];
     var info = {};
-    keys.forEach(function(k){
+    keys.forEach(function (k) {
       var v = sp.getProperty(k);
-      info[k] = v ? { present:true, length:v.length } : { present:false, length:0 };
+      info[k] = v ? { present: true, length: v.length } : { present: false, length: 0 };
     });
     // Also show which globals are compiled in (without values)
     info._globals = {
@@ -172,7 +172,7 @@ function server_resetWeeklyMsgIds(secret) {
     var w = (typeof getAlignedUpcomingWeekOrReport_ === 'function') ? getAlignedUpcomingWeekOrReport_() : {};
     if (typeof syncHeaderMetaToTables_ === 'function') w = syncHeaderMetaToTables_(w, 'Bronze');
     var wkKey = (typeof weekKey_ === 'function') ? weekKey_(w)
-              : (w && w.date ? Utilities.formatDate(w.date, 'America/New_York', 'yyyy-MM-dd') : '') + '|' + (w.mapRef || '');
+      : (w && w.date ? Utilities.formatDate(w.date, 'America/New_York', 'yyyy-MM-dd') : '') + '|' + (w.mapRef || '');
 
     // Load, then clear
     var before = (typeof _loadMsgIds_ === 'function') ? _loadMsgIds_(wkKey) : {};
@@ -186,7 +186,7 @@ function server_resetWeeklyMsgIds(secret) {
       ? _ok_({ weekKey: wkKey, cleared: true, prevIds: before })
       : { ok: true, data: { weekKey: wkKey, cleared: true, prevIds: before } };
   } catch (e) {
-    return (typeof _err_ === 'function') ? _err_(e) : { ok:false, error:String(e && e.message || e) };
+    return (typeof _err_ === 'function') ? _err_(e) : { ok: false, error: String(e && e.message || e) };
   }
 }
 
@@ -201,22 +201,22 @@ function server_deleteWeeklyCluster(secret) {
     if (!wkKey) throw new Error('No weekKey');
 
     var channelId = PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID') ||
-                    (typeof WEEKLY_POST_CHANNEL_ID !== 'undefined' ? WEEKLY_POST_CHANNEL_ID : '');
+      (typeof WEEKLY_POST_CHANNEL_ID !== 'undefined' ? WEEKLY_POST_CHANNEL_ID : '');
     if (!channelId) throw new Error('WEEKLY_POST_CHANNEL_ID missing');
 
     var ids = _loadMsgIds_(wkKey);
 
     // Gather all candidate message IDs (header + weekly table(s) + rematch(es))
     var toDelete = [];
-    if (ids.header)    toDelete.push(ids.header);
-    if (ids.table)     toDelete.push(ids.table);
-    if (ids.rematch)   toDelete.push(ids.rematch);
-    if (Array.isArray(ids.tables))    toDelete = toDelete.concat(ids.tables);
+    if (ids.header) toDelete.push(ids.header);
+    if (ids.table) toDelete.push(ids.table);
+    if (ids.rematch) toDelete.push(ids.rematch);
+    if (Array.isArray(ids.tables)) toDelete = toDelete.concat(ids.tables);
     if (Array.isArray(ids.rematches)) toDelete = toDelete.concat(ids.rematches);
 
     // De-duplicate & strip empties
     var seen = {};
-    toDelete = toDelete.filter(function(x){
+    toDelete = toDelete.filter(function (x) {
       x = String(x || '').trim();
       if (!x) return false;
       if (seen[x]) return false;
@@ -225,7 +225,7 @@ function server_deleteWeeklyCluster(secret) {
     });
 
     var results = { attempted: toDelete.slice(), ok: [], fail: [] };
-    for (var i=0; i<toDelete.length; i++) {
+    for (var i = 0; i < toDelete.length; i++) {
       try {
         if (deleteMessage_(channelId, toDelete[i])) {
           results.ok.push(toDelete[i]);
@@ -249,7 +249,7 @@ function server_deleteWeeklyCluster(secret) {
         deletedCount: results.ok.length, failedCount: results.fail.length,
         ok: results.ok, fail: results.fail
       });
-    } catch (_){}
+    } catch (_) { }
 
     return _ok_({ weekKey: wkKey, deleted: results });
   } catch (e) {
@@ -273,9 +273,8 @@ function server_postOrUpdate(secret) {
 function server_startPollingFrom(secret, startId) {
   try {
     _checkSecret_(secret);
-    var channelId = PropertiesService.getScriptProperties().getProperty('POLL_CHANNEL_ID') ||
-                    PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID');
-    if (!channelId) throw new Error('POLL_CHANNEL_ID (or WEEKLY_POST_CHANNEL_ID) missing');
+    var channelId = PropertiesService.getScriptProperties().getProperty('SCHED_INPUT_CHANNEL_ID')
+    if (!channelId) throw new Error('SCHED_INPUT_CHANNEL_ID is missing');
 
     var t0 = Date.now();
     var summary = _pollAndProcessFromId_(channelId, String(startId), { inclusive: true });
@@ -290,9 +289,8 @@ function server_startPollingFrom(secret, startId) {
 function server_startPolling(secret) {
   try {
     _checkSecret_(secret);
-    var channelId = PropertiesService.getScriptProperties().getProperty('POLL_CHANNEL_ID') ||
-                    PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID');
-    if (!channelId) throw new Error('POLL_CHANNEL_ID (or WEEKLY_POST_CHANNEL_ID) missing');
+    var channelId = PropertiesService.getScriptProperties().getProperty('SCHED_INPUT_CHANNEL_ID');
+    if (!channelId) throw new Error('SCHED_INPUT_CHANNEL_ID is missing');
 
     var startId = _getPointer_();
     var t0 = Date.now();
@@ -304,25 +302,6 @@ function server_startPolling(secret) {
   }
 }
 
-function logToWmSheet_(level, event, message, detailsObj) {
-  try {
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sh = ss.getSheetByName(LOG_SHEET) || ss.insertSheet(LOG_SHEET);
-    if (sh.getLastRow() === 0) {
-      sh.appendRow(['Timestamp','Level','Event','Message','Details (JSON)']);
-      sh.hideSheet(); // keep it tidy
-    }
-    sh.appendRow([
-      Utilities.formatDate(new Date(), getTz_ ? getTz_() : Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),
-      String(level||'INFO'),
-      String(event||''),
-      String(message||''),
-      detailsObj ? JSON.stringify(detailsObj) : ''
-    ]);
-  } catch (e) {
-    // Don't let logging failures break anything
-  }
-}
 
 // ----- OAuth callback endpoints for Twitch integration (if used) -----
 
@@ -379,29 +358,11 @@ function doPost(e) {
   }
 }
 
-// ----- Minimal persistent storage for Twitch links -----
-
-function _saveTwitchForUser_(userId, twitchUrl) {
-  const key = 'TWITCH_URL__' + String(userId);
-  _props_().setProperty(key, String(twitchUrl));
-}
-
-function server_getTwitchUrl(secret, userId) {
-  try {
-    _checkSecret_(secret);
-    const key = 'TWITCH_URL__' + String(userId);
-    const url = _props_().getProperty(key) || '';
-    return _ok_({ userId: String(userId), twitchUrl: url });
-  } catch (e) {
-    return _err_(e);
-  }
-}
-
 function server_probeRelay(secret) {
   try {
     _checkSecret_(secret); // your webapp secret check
     var channelId = PropertiesService.getScriptProperties().getProperty('POLL_CHANNEL_ID') ||
-                    PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID');
+      PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID');
     if (!channelId) throw new Error('POLL_CHANNEL_ID or WEEKLY_POST_CHANNEL_ID missing');
 
     var out = {};
@@ -412,8 +373,8 @@ function server_probeRelay(secret) {
       out.messagesError = String(e && e.message || e);
     }
     // optional health/whoami if your relay exposes them
-    try { out.health = relayFetch_('/health', { method:'get' }); } catch (e) { out.healthError = String(e && e.message || e); }
-    try { out.whoami = relayFetch_('/whoami', { method:'get' }); } catch (e) { out.whoamiError = String(e && e.message || e); }
+    try { out.health = relayFetch_('/health', { method: 'get' }); } catch (e) { out.healthError = String(e && e.message || e); }
+    try { out.whoami = relayFetch_('/whoami', { method: 'get' }); } catch (e) { out.whoamiError = String(e && e.message || e); }
 
     return _ok_(out);
   } catch (e) {
@@ -424,19 +385,19 @@ function server_probeRelay(secret) {
 function server_probeRelayRoutes(secret) {
   try {
     _checkSecret_(secret);
-    var p = (typeof getRelayPaths_==='function') ? getRelayPaths_() : {};
+    var p = (typeof getRelayPaths_ === 'function') ? getRelayPaths_() : {};
     var channelId = PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID') ||
-                    PropertiesService.getScriptProperties().getProperty('POLL_CHANNEL_ID') || '';
+      PropertiesService.getScriptProperties().getProperty('POLL_CHANNEL_ID') || '';
 
     var results = {};
 
     function tryGet(label, path) {
-      if (!path) return results[label] = { skip:true };
+      if (!path) return results[label] = { skip: true };
       try {
-        var r = relayFetch_(path, { method:'get' }); // many POST routes won’t accept GET; that’s fine
-        results[label] = { ok:true, code:200, sample: r };
+        var r = relayFetch_(path, { method: 'get' }); // many POST routes won’t accept GET; that’s fine
+        results[label] = { ok: true, code: 200, sample: r };
       } catch (e) {
-        results[label] = { ok:false, error: String(e && e.message || e), path:path };
+        results[label] = { ok: false, error: String(e && e.message || e), path: path };
       }
     }
 
@@ -448,12 +409,12 @@ function server_probeRelayRoutes(secret) {
     if (channelId) {
       try {
         var page = fetchChannelMessages_(channelId, { limit: 1 }) || [];
-        results.messages = { ok:true, count: page.length, sampleId: (page[0] && page[0].id) || null, path:p.messages };
+        results.messages = { ok: true, count: page.length, sampleId: (page[0] && page[0].id) || null, path: p.messages };
       } catch (e) {
-        results.messages = { ok:false, error: String(e && e.message || e), path:p.messages };
+        results.messages = { ok: false, error: String(e && e.message || e), path: p.messages };
       }
     } else {
-      results.messages = { ok:false, error: 'No channelId to test', path:p.messages };
+      results.messages = { ok: false, error: 'No channelId to test', path: p.messages };
     }
 
     // Report configured paths so you can verify

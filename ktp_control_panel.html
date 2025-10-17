@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="utf-8" />
   <title>KTP Weekly Matches Panel</title>
@@ -11,18 +12,52 @@
       --muted: #9CA3AF;
       --ok: #22c55e;
       --err: #ef4444;
-      --warn:#f59e0b;
+      --warn: #f59e0b;
       --txt: #e5e7eb;
-      --accent:#60a5fa;
+      --accent: #60a5fa;
     }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--txt); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-    a { color: var(--accent); text-decoration: none; }
-    h1 { margin: 16px 0 12px; font-size: 22px; }
-    h2 { margin: 14px 0 8px; font-size: 16px; color: var(--muted); font-weight: 600; }
 
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 16px 20px 120px; }
-    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: var(--bg);
+      color: var(--txt);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    h1 {
+      margin: 16px 0 12px;
+      font-size: 22px;
+    }
+
+    h2 {
+      margin: 14px 0 8px;
+      font-size: 16px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 16px 20px 120px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 12px;
+    }
 
     .card {
       background: var(--card);
@@ -31,11 +66,27 @@
       padding: 12px;
       box-shadow: 0 1px 0 rgb(255 255 255 / 0.02) inset, 0 8px 24px rgb(0 0 0 / 0.25);
     }
-    .card h2 { margin-top: 2px; }
 
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
-    .row label { font-size: 12px; color: var(--muted); margin-right: 6px; }
-    .row input[type="text"], .row input[type="password"] {
+    .card h2 {
+      margin-top: 2px;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 6px 0;
+    }
+
+    .row label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-right: 6px;
+    }
+
+    .row input[type="text"],
+    .row input[type="password"] {
       background: #0b1220;
       color: var(--txt);
       border: 1px solid #334155;
@@ -44,7 +95,10 @@
       min-width: 220px;
       outline: none;
     }
-    .row input[type="checkbox"] { transform: translateY(1px); }
+
+    .row input[type="checkbox"] {
+      transform: translateY(1px);
+    }
 
     .btn {
       background: #0b1220;
@@ -55,43 +109,121 @@
       cursor: pointer;
       font-weight: 600;
     }
-    .btn:hover { background: #0b1529; }
-    .btn.warn { border-color: var(--warn); color: #fff; }
-    .btn.danger { border-color: var(--err); color: #fff; }
-    .btn.ok { border-color: var(--ok); }
+
+    .btn:hover {
+      background: #0b1529;
+    }
+
+    .btn.warn {
+      border-color: var(--warn);
+      color: #fff;
+    }
+
+    .btn.danger {
+      border-color: var(--err);
+      color: #fff;
+    }
+
+    .btn.ok {
+      border-color: var(--ok);
+    }
 
     .pill {
-      display: inline-block; padding: 4px 8px; border-radius: 999px;
-      font-size: 12px; font-weight: 700; letter-spacing: .3px;
-      border: 1px solid #374151; background: #0b1220; color: var(--muted);
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .3px;
+      border: 1px solid #374151;
+      background: #0b1220;
+      color: var(--muted);
     }
-    .status { margin-left: 8px; }
-    .status.ok { color: var(--ok); border-color: var(--ok); }
-    .status.err { color: var(--err); border-color: var(--err); }
-    .status.busy { color: var(--warn); border-color: var(--warn); }
+
+    .status {
+      margin-left: 8px;
+    }
+
+    .status.ok {
+      color: var(--ok);
+      border-color: var(--ok);
+    }
+
+    .status.err {
+      color: var(--err);
+      border-color: var(--err);
+    }
+
+    .status.busy {
+      color: var(--warn);
+      border-color: var(--warn);
+    }
 
     /* Debug dock (fixed, top-right) */
     .debug-dock {
-      position: fixed; right: 16px; top: 16px; width: 420px; height: 52vh;
-      background: var(--panel); border: 1px solid #374151; border-radius: 10px;
-      display: flex; flex-direction: column; overflow: hidden; z-index: 9999;
-      box-shadow: 0 8px 28px rgba(0,0,0,.35);
+      position: fixed;
+      right: 16px;
+      top: 16px;
+      width: 420px;
+      height: 52vh;
+      background: var(--panel);
+      border: 1px solid #374151;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      z-index: 9999;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
     }
+
     .debug-head {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 10px; border-bottom: 1px solid #30363d; background: #0b1220;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-bottom: 1px solid #30363d;
+      background: #0b1220;
     }
-    .debug-head b { font-size: 12px; color: var(--muted); }
-    .debug-actions { display: flex; gap: 6px; }
-    .debug-actions .btn { padding: 6px 8px; font-size: 12px; }
+
+    .debug-head b {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .debug-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .debug-actions .btn {
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+
     #debugOut {
-      flex: 1; margin: 0; padding: 10px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      background: #0a0f1a; color: #d1d5db; overflow: auto; white-space: pre-wrap; word-wrap: break-word;
+      flex: 1;
+      margin: 0;
+      padding: 10px;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      background: #0a0f1a;
+      color: #d1d5db;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
-    .collapsed #debugOut { display: none; }
-    .footer-note { color: var(--muted); font-size: 11px; margin-top: 8px; }
+
+    .collapsed #debugOut {
+      display: none;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 8px;
+    }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <h1>KTP Weekly Matches Panel</h1>
@@ -113,7 +245,8 @@
         </div>
         <div class="footer-note">
           Tip: Script properties supported: <code>WEBAPP_SECRET</code>, <code>WEBAPP_SECRET_V2</code>,
-          <code>RELAY_SHARED_SECRET</code>, <code>PANEL_SECRET</code>. You can also set <code>DEV_MODE=true</code> and <code>SECRET_DEV</code>.
+          <code>RELAY_SHARED_SECRET</code>, <code>PANEL_SECRET</code>. You can also set <code>DEV_MODE=true</code> and
+          <code>SECRET_DEV</code>.
         </div>
       </div>
 
@@ -141,18 +274,6 @@
           <button id="btnResetIds" class="btn warn">Reset Saved Header/Table IDs</button>
         </div>
         <div class="row">
-          <button id="btnPreview" class="btn">Preview Tables</button>
-          <button id="btnWeekMeta" class="btn">Week Meta</button>
-        </div>
-      </div>
-
-      <!-- Team Index / Debug -->
-      <div class="card" style="grid-column: span 12;">
-        <h2>Team Index Debug</h2>
-        <div class="row">
-          <button id="btnIdxSnap" class="btn">Show Snapshot</button>
-          <label><input id="resetIdxCache" type="checkbox" /> reset cache</label>
-          <button id="btnIdxSnapReset" class="btn warn">Reset &amp; Show Snapshot</button>
         </div>
       </div>
     </div>
@@ -356,55 +477,6 @@
         setBusy(false);
       }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
       .server_resetMsgIdsForCurrent(secret);
-    };
-
-    // Preview Tables
-    $('btnPreview').onclick = () => {
-      const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('missing secret','err'); return; }
-      setBusy(true, 'Previewing…'); out('▶ Preview Tables…');
-      google.script.run.withSuccessHandler(res => {
-        out(res.ok ? ('✅ Preview Tables result\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
-        setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_previewTables(secret);
-    };
-
-    // Week Meta
-    $('btnWeekMeta').onclick = () => {
-      const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('missing secret','err'); return; }
-      setBusy(true, 'Fetching week meta…'); out('▶ Week Meta…');
-      google.script.run.withSuccessHandler(res => {
-        out(res.ok ? ('✅ Week Meta result\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
-        setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_debugWeekMeta(secret);
-    };
-
-    // Team Index: Snapshot
-    $('btnIdxSnap').onclick = () => {
-      const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('missing secret','err'); return; }
-      setBusy(true, 'Team index snapshot…'); out('▶ Team Index Snapshot…');
-      google.script.run.withSuccessHandler(res => {
-        out(res.ok ? ('✅ Team Index Snapshot\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
-        setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_debugIndexSnapshot(secret, false);
-    };
-
-    // Team Index: Reset & Snapshot
-    $('btnIdxSnapReset').onclick = () => {
-      const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('missing secret','err'); return; }
-      const reset = !!$('resetIdxCache').checked;
-      setBusy(true, 'Reset & snapshot…'); out('▶ Team Index Snapshot (reset=' + reset + ')…');
-      google.script.run.withSuccessHandler(res => {
-        out(res.ok ? ('✅ Team Index Snapshot\n' + JSON.stringify(res.data, null, 2)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
-        setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_debugIndexSnapshot(secret, reset);
     };
 
     // Debug dock controls

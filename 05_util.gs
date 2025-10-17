@@ -52,9 +52,9 @@ function parseDateFromText_(text, refYear) {
   }
   const m2 = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i);
   if (m2) {
-    const months = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, sept:8, oct:9, nov:10, dec:11 };
+    const months = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
     const yy2 = refYear || new Date().getFullYear();
-    return new Date(yy2, months[m2[1].slice(0,3).toLowerCase()], parseInt(m2[2], 10));
+    return new Date(yy2, months[m2[1].slice(0, 3).toLowerCase()], parseInt(m2[2], 10));
   }
   return null;
 }
@@ -67,10 +67,10 @@ function getTz_() {
 
 function discordEpochAt9pmFromISO_(dateISO, tz) {
   if (!dateISO) return null;
-  tz = tz || (typeof getTz_==='function' ? getTz_() : 'America/New_York');
+  tz = tz || (typeof getTz_ === 'function' ? getTz_() : 'America/New_York');
   // Apps Script `Date` uses project timezone; set that to your league TZ in Project Settings for perfect alignment.
   var p = String(dateISO).split('-');
-  var y = +p[0], m = +p[1]-1, d = +p[2];
+  var y = +p[0], m = +p[1] - 1, d = +p[2];
   var dt = new Date(y, m, d, 21, 0, 0, 0); // 9:00 PM local
   return Math.floor(dt.getTime() / 1000);
 }
@@ -78,22 +78,22 @@ function discordEpochAt9pmFromISO_(dateISO, tz) {
 // ----- STRING & TEXT HELPERS -----
 /** Normalize generic token text (lowercase, strip non-alphanumeric). */
 function formatWeeklyNotice_(week, actionWord) {
-  var tz     = (week && week.tz) || (typeof getTz_==='function' ? getTz_() : 'America/New_York');
+  var tz = (week && week.tz) || (typeof getTz_ === 'function' ? getTz_() : 'America/New_York');
   var season = (week && week.seasonWeek) || '';
   var mapRef = (week && week.mapRef) || '';
-  var seasonInfo = (typeof getSeasonInfo_==='function' ? getSeasonInfo_() : '');
+  var seasonInfo = (typeof getSeasonInfo_ === 'function' ? getSeasonInfo_() : '');
   var ts = Utilities.formatDate(new Date(), tz, 'MMM d, h:mm a z');
 
   // :white_check_mark: <KTP_SEASON_INFO> <season> <mapRef> Weekly Boards <Posted/Edited>. <timestamp> <:ktp:...>
   return ':white_check_mark: ' +
-         [seasonInfo, season, mapRef].filter(Boolean).join(' ') +
-         ' Weekly Boards ' + (actionWord || 'Posted/Edited') + '. ' +
-         ts + ' ' + ktpEmoji_();
+    [seasonInfo, season, mapRef].filter(Boolean).join(' ') +
+    ' Weekly Boards ' + (actionWord || 'Posted/Edited') + '. ' +
+    ts + ' ' + ktpEmoji_();
 }
 
 /** Normalize map key to lowercase (dod_*). */
-function normalizeMap_(s){
-  return String(s||'').trim().toLowerCase();
+function normalizeMap_(s) {
+  return String(s || '').trim().toLowerCase();
 }
 
 // ----- SNOWFLAKE (Discord ID) HELPERS -----
@@ -121,12 +121,12 @@ function _repeat_(ch, n) {
   return (typeof ch.repeat === 'function') ? ch.repeat(n) : new Array(n + 1).join(ch);
 }
 
-function _padR_(s,n){ s=String(s||''); var k=Math.max(0,n-s.length); return s+(k?Array(k+1).join(' '):''); }
-function _padL_(s,n){ s=String(s||''); var k=Math.max(0,n-s.length); return (k?Array(k+1).join(' '):'')+s; }
-function _truncate_(s,n){ s=String(s||''); return (s.length>n)?(s.slice(0,n-1)+'…'):s; }
-function _padC_(s,n){
-  s = String(s||''); var k=Math.max(0,n-s.length), L=Math.floor(k/2), R=k-L;
-  return (L?Array(L+1).join(' '):'') + s + (R?Array(R+1).join(' '):'');
+function _padR_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return s + (k ? Array(k + 1).join(' ') : ''); }
+function _padL_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return (k ? Array(k + 1).join(' ') : '') + s; }
+function _truncate_(s, n) { s = String(s || ''); return (s.length > n) ? (s.slice(0, n - 1) + '…') : s; }
+function _padC_(s, n) {
+  s = String(s || ''); var k = Math.max(0, n - s.length), L = Math.floor(k / 2), R = k - L;
+  return (L ? Array(L + 1).join(' ') : '') + s + (R ? Array(R + 1).join(' ') : '');
 }
 
 // Column widths used by all tables.
@@ -136,21 +136,21 @@ function _getTableWidths_() {
 }
 
 function _formatVsCell_(home, away, col1) {
-  var token=' vs ', L=Math.floor((col1-token.length)/2), R=col1-token.length-L;
-  home=_truncate_(String(home||''),L); away=_truncate_(String(away||''),R);
-  return _padL_(home,L)+token+_padR_(away,R);
+  var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
+  home = _truncate_(String(home || ''), L); away = _truncate_(String(away || ''), R);
+  return _padL_(home, L) + token + _padR_(away, R);
 }
 
-function _formatVsHeader_(col1){ return _formatVsCell_('Home','Away',col1); }
+function _formatVsHeader_(col1) { return _formatVsCell_('Home', 'Away', col1); }
 
 // Format a single "Home vs Away" cell to match header alignment
 function _formatVsRow_(home, away, col1) {
-  var token=' vs ', L=Math.floor((col1-token.length)/2), R=col1-token.length-L;
-  home=_truncate_(String(home||''),L); away=_truncate_(String(away||''),R);
-  return _padL_(home,L)+token+_padR_(away,R);
+  var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
+  home = _truncate_(String(home || ''), L); away = _truncate_(String(away || ''), R);
+  return _padL_(home, L) + token + _padR_(away, R);
 }
 
-function __isBye(s){ return /^\s*BYE\s*$/i.test(String(s||'')); }
+function __isBye(s) { return /^\s*BYE\s*$/i.test(String(s || '')); }
 
 function idFromRelay_(resp) {
   try {
@@ -159,41 +159,69 @@ function idFromRelay_(resp) {
     if (resp.id) return String(resp.id);
     if (resp.message && resp.message.id) return String(resp.message.id);
     if (resp.data && resp.data.id) return String(resp.data.id);
-  } catch (e) {}
+  } catch (e) { }
   return null;
+}
+
+function _ensureFence_(s) {
+  s = String(s || '').trim();
+  if (!s) return '';
+  return s.startsWith('```') ? s : ('```text\n' + s + '\n```');
+}
+
+function _stripFence_(s) {
+  s = String(s || '');
+  var m = s.match(/^```[\s\S]*?\n([\s\S]*?)\n```$/);
+  return m ? m[1] : s;
+}
+
+function _chunkByLimit_(raw, maxLen) {
+  maxLen = maxLen || 1900; // keep headroom for safety
+  var out = [];
+  var lines = String(raw || '').split('\n');
+  var cur = '';
+  for (var i = 0; i < lines.length; i++) {
+    var ln = lines[i];
+    // +1 for newline (except first line)
+    if ((cur.length ? cur.length + 1 : 0) + ln.length > maxLen) {
+      if (cur) out.push(cur);
+      cur = ln;
+      // Extremely long single line fallback
+      while (cur.length > maxLen) {
+        out.push(cur.slice(0, maxLen));
+        cur = cur.slice(maxLen);
+      }
+    } else {
+      cur = cur ? (cur + '\n' + ln) : ln;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
 }
 
 // ----- HASH HELPERS -----
 function _hashString_(s) { return sha256Hex_(String(s || '')); }
 
-/**
- * Compute a SHA-256 hash (hex string) of a string or object.
- * - If you pass a non-string, it will JSON.stringify it first.
- */
-function sha256Hex_(value) {
-  var s = (typeof value === 'string') ? value : JSON.stringify(value || {});
-  // Compute digest as bytes (UTF-8), then convert to hex
-  var bytes = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.SHA_256,
-    s,
-    Utilities.Charset.UTF_8
-  );
-  var hex = '';
-  for (var i = 0; i < bytes.length; i++) {
-    var b = (bytes[i] + 256) & 0xff;         // normalize signed byte
-    hex += (b < 16 ? '0' : '') + b.toString(16);
+/** 2k-safe hash for strings/objects */
+function sha256Hex_(s) {
+  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(s), Utilities.Charset.UTF_8);
+  var out = '';
+  for (var i = 0; i < raw.length; i++) {
+    var b = (raw[i] + 256) % 256;
+    out += (b + 0x100).toString(16).slice(1);
   }
-  return hex;
+  return out;
 }
-
-function _safeHeaderHash_(h) {
+/** remove volatile fields (timestamp/footer) before hashing header */
+function _safeHeaderHash_(headerObj) {
   try {
-    var x = JSON.parse(JSON.stringify(h || {}));
-    if (x.embeds && x.embeds[0] && x.embeds[0].footer) delete x.embeds[0].footer;
-    return sha256Hex_(x);
-  } catch (e) {
-    return sha256Hex_(String(h || ''));
-  }
+    var h = JSON.parse(JSON.stringify(headerObj || {}));
+    if (h && h.embeds && h.embeds[0]) {
+      if (h.embeds[0].timestamp) delete h.embeds[0].timestamp;
+      if (h.embeds[0].footer) delete h.embeds[0].footer;
+    }
+    return sha256Hex_(JSON.stringify(h));
+  } catch (_) { return ''; }
 }
 
 // Hash embeds without footer noise (like _safeHeaderHash_)
@@ -201,7 +229,7 @@ function _safeEmbedsHash_(embeds) {
   try {
     var x = JSON.parse(JSON.stringify(embeds || []));
     if (x && x.length) {
-      for (var i=0;i<x.length;i++) {
+      for (var i = 0; i < x.length; i++) {
         if (x[i] && x[i].footer) delete x[i].footer;
       }
     }
@@ -213,17 +241,39 @@ function _safeEmbedsHash_(embeds) {
 
 // ----- CACHING HELPERS -----
 
-function cache_(){ return CacheService.getScriptCache(); }
+function cache_() { return CacheService.getScriptCache(); }
 
-function cacheGetJson_(key){
+function cacheGetJson_(key) {
   const s = cache_().get(key);
   if (!s) return null;
-  try { return JSON.parse(s); } catch(e){ return null; }
+  try { return JSON.parse(s); } catch (e) { return null; }
 }
 
-function cachePutJson_(key, obj, ttlSec){
-  cache_().put(key, JSON.stringify(obj||{}), Math.min(21600, Math.max(30, ttlSec||300)));
+function cachePutJson_(key, obj, ttlSec) {
+  cache_().put(key, JSON.stringify(obj || {}), Math.min(21600, Math.max(30, ttlSec || 300)));
 }
+
+let __TEAM_ALIAS_CACHE = null;
+
+function loadTeamAliases_() {
+  if (__TEAM_ALIAS_CACHE) return __TEAM_ALIAS_CACHE;
+
+  const sh = SpreadsheetApp.getActive().getSheetByName('_Aliases');
+  if (!sh) return (__TEAM_ALIAS_CACHE = {});
+
+  const data = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues(); // alias | canonical
+  const aliasMap = {}; // aliasUpper -> canonicalUpper
+
+  for (const [alias, canon] of data) {
+    const a = String(alias || '').trim().toUpperCase();
+    const c = String(canon || '').trim().toUpperCase();
+    if (a && c) aliasMap[a] = c;
+  }
+
+  __TEAM_ALIAS_CACHE = aliasMap;
+  return aliasMap;
+}
+
 
 /**
  * Convert a big tables body (multiple code-fenced sections) into
@@ -249,16 +299,16 @@ function _tablesBodyToEmbeds_(body) {
         // very long single segment; hard split by lines
         var lines = seg.split('\n');
         var buf = '';
-        for (var j=0;j<lines.length;j++){
+        for (var j = 0; j < lines.length; j++) {
           var ln = lines[j];
           if ((buf + (buf ? '\n' : '') + ln).length > MAX) {
-            embeds.push({ type:'rich', description: buf, color: 0x2b6cb0 });
+            embeds.push({ type: 'rich', description: buf, color: 0x2b6cb0 });
             buf = ln;
           } else {
             buf = buf ? (buf + '\n' + ln) : ln;
           }
         }
-        if (buf) embeds.push({ type:'rich', description: buf, color: 0x2b6cb0 });
+        if (buf) embeds.push({ type: 'rich', description: buf, color: 0x2b6cb0 });
         cur = '';
       }
     } else {
@@ -299,7 +349,7 @@ function getDivisionSheets_() {
       const arr = JSON.parse(raw);
       if (Array.isArray(arr) && arr.length) return arr;
     }
-  } catch (e) {}
+  } catch (e) { }
   // Default fallback
   return ['Bronze', 'Silver', 'Gold'];
 }
@@ -329,10 +379,10 @@ function getGridCols_() {
   var sp = PropertiesService.getScriptProperties();
   function getOrDef(key, def) { return (sp.getProperty(key) || def); }
   var WL1 = colIdx_(getOrDef('GRID_COL_WL1', 'B'));
-  var T1  = colIdx_(getOrDef('GRID_COL_TEAM1', 'C'));
-  var S1  = colIdx_(getOrDef('GRID_COL_SCORE1', 'D'));
+  var T1 = colIdx_(getOrDef('GRID_COL_TEAM1', 'C'));
+  var S1 = colIdx_(getOrDef('GRID_COL_SCORE1', 'D'));
   var WL2 = colIdx_(getOrDef('GRID_COL_WL2', 'F'));
-  var T2  = colIdx_(getOrDef('GRID_COL_TEAM2', 'G'));
-  var S2  = colIdx_(getOrDef('GRID_COL_SCORE2', 'H'));
-  return { WL1:WL1, T1:T1, S1:S1, WL2:WL2, T2:T2, S2:S2 };
+  var T2 = colIdx_(getOrDef('GRID_COL_TEAM2', 'G'));
+  var S2 = colIdx_(getOrDef('GRID_COL_SCORE2', 'H'));
+  return { WL1: WL1, T1: T1, S1: S1, WL2: WL2, T2: T2, S2: S2 };
 }
