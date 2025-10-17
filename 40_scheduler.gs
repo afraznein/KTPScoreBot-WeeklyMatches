@@ -180,7 +180,6 @@ function WM_pollScheduling(){
   sendLog_(`✅ Processed ${processed} msg(s); last=${props.getProperty(LAST_SCHED_KEY)||''}`);
 }
 
-
 /** Short follow-up run to read shoutcaster reactions and update stores/board quickly. */
 function WM_pollScExtras(){
   const props = props_();
@@ -347,3 +346,199 @@ function locatePendingMatchAlignedThenHistory_(division, alignedWeek, teamA, tea
 
   return { located:false, reason:'no_pending_match', division:division, from:'none' };
 }
+
+/***************
+ * POLLER WIRING
+ ***************/
+
+// Channels to poll (comma-separated) in Script Properties:
+//   POLL_CHANNEL_IDS = "123,456,789"
+// Fallbacks if not set: WEEKLY_POLL_CHANNEL_ID or WEEKLY_POST_CHANNEL_ID
+function getPollChannels_() {
+  var sp = PropertiesService.getScriptProperties();
+  var list = (sp.getProperty('POLL_CHANNEL_IDS') || '').trim();
+  if (list) return list.split(/\s*,\s*/).filter(Boolean);
+  var single = sp.getProperty('WEEKLY_POLL_CHANNEL_ID') || sp.getProperty('WEEKLY_POST_CHANNEL_ID') || '';
+  return single ? [single] : [];
+}
+function _lastSeenKey_(channelId){ return 'LAST_SEEN_' + String(channelId); }
+function getLastSeenId_(channelId){
+  return PropertiesService.getScriptProperties().getProperty(_lastSeenKey_(channelId)) || '';
+}
+function setLastSeenId_(channelId, messageId){
+  PropertiesService.getScriptProperties().setProperty(_lastSeenKey_(channelId), String(messageId || ''));
+}
+
+// Robust extractor for relay payloads
+function _msgsFromRelay_(resp) {
+  if (!resp) return [];
+  if (Array.isArray(resp)) return resp;
+  if (Array.isArray(resp.messages)) return resp.messages;
+  if (Array.isArray(resp.items)) return resp.items;
+  if (resp.data && Array.isArray(resp.data.messages)) return resp.data.messages;
+  return [];
+}
+function _idFromMsg_(m){
+  if (!m) return '';
+  if (m.id) return String(m.id);
+  if (m.messageId) return String(m.messageId);
+  if (m.message && m.message.id) return String(m.message.id);
+  return '';
+}
+function _contentFromMsg_(m){
+  if (!m) return '';
+  if (typeof m.content === 'string') return m.content;
+  if (m.message && typeof m.message.content === 'string') return m.message.content;
+  if (m.data && typeof m.data.content === 'string') return m.data.content;
+  return '';
+}
+function _authorFromMsg_(m){
+  var a = (m && (m.author || m.user || (m.message && m.message.author))) || {};
+  return {
+    id: String(a.id || ''),
+    username: String(a.username || a.global_name || a.tag || '')
+  };
+}
+function _looksLikeSchedule_(text){
+  var s = String(text||'').toLowerCase();
+  // quick heuristics: has " vs " and not only a URL
+  return (/\bvs\b/i.test(s) && s.replace(/https?:\/\/\S+/g,'').trim().length > 6);
+}
+function _looksLikeShoutcast_(text){
+  return /shoutcast/i.test(String(text||''));
+}
+
+/**
+ * Process ONE inbound Discord message:
+ * - Shoutcast command first (exact row update of caster)
+ * - Otherwise schedule parsing (may update several rows' Scheduled)
+ * Returns a small summary object.
+ */
+function processInboundMessage_(msg, wkKey, weekObj) {
+  var summary = { ok:true, did:{ caster:false, schedule:false }, errors:[] };
+  try {
+    var content = _contentFromMsg_(msg);
+    if (!content) return summary;
+
+    // Skip our own bot messages if BOT_USER_ID is configured
+    try {
+      var sp = PropertiesService.getScriptProperties();
+      var botId = sp.getProperty('BOT_USER_ID') || '';
+      var author = _authorFromMsg_(msg);
+      if (botId && author.id && String(botId) === String(author.id)) return summary;
+    } catch (_){}
+
+    // 1) Shoutcast command?
+    if (_looksLikeShoutcast_(content) && typeof parseShoutcastCommand_ === 'function') {
+      var cmd = parseShoutcastCommand_(content);
+      if (cmd && cmd.ok) {
+        var author = _authorFromMsg_(msg);
+        var url = (typeof getTwitchForUser_==='function') ? getTwitchForUser_(author.id) : '';
+        if (!wkKey && weekObj && weekObj.weekKey) wkKey = weekObj.weekKey;
+
+        if (!url) {
+          // ask once, store placeholder; user can repeat the same shoutcast command later
+          try {
+            if (typeof postDM_==='function') {
+              postDM_(author.id, "Hey "+(author.username||'there')+"! Please reply with your Twitch URL so I can attach it to the weekly board (e.g., https://twitch.tv/yourname).");
+            }
+            if (typeof setTwitchForUser_==='function') setTwitchForUser_(author.id, author.username||'', '');
+          } catch(_){}
+          summary.did.caster = false;
+        } else if (wkKey) {
+          var r = updateRowCasterInTablesMessage_(wkKey, cmd.map, cmd.home, cmd.away, url);
+          summary.did.caster = !!(r && r.ok && r.edited);
+        }
+      }
+    }
+
+    // 2) Schedule parsing (apply only if there are pairs)
+    if (_looksLikeSchedule_(content) && typeof parseScheduleMessage_v2 === 'function') {
+      var parsed = parseScheduleMessage_v2(content);
+      if (parsed && parsed.ok && parsed.pairs && parsed.pairs.length) {
+        if (!wkKey && weekObj && weekObj.weekKey) wkKey = weekObj.weekKey;
+        if (wkKey) {
+          var u = updateTablesMessageFromPairs_(wkKey, parsed.pairs);
+          summary.did.schedule = !!(u && u.ok && (u.edited || u.rowsChanged>0));
+        }
+      }
+    }
+
+  } catch (e) {
+    summary.ok = false;
+    summary.errors.push(String(e && e.message || e));
+  }
+  return summary;
+}
+
+/**
+ * Poll all configured channels for new messages and apply updates in place.
+ * Stores LAST_SEEN per channel in Script Properties.
+ */
+function pollDiscordOnce_() {
+  var channels = getPollChannels_();
+  var week   = (typeof getAlignedUpcomingWeekOrReport_==='function') ? getAlignedUpcomingWeekOrReport_() : null;
+  var wkKey  = (week && week.weekKey) || '';
+  var sp     = PropertiesService.getScriptProperties();
+
+  var totals = { channels: channels.length, messages:0, scheduleApplied:0, casterApplied:0, touchedHeader:false };
+  for (var ci=0; ci<channels.length; ci++) {
+    var ch = channels[ci];
+    var after = getLastSeenId_(ch);
+    var lastProcessed = after;
+    var more = true, pageGuard = 0;
+
+    while (more && pageGuard++ < 20) { // guard against loops
+      var resp = null;
+      try {
+        // Your relay fetch; adjust signature if needed:
+        // fetchChannelMessages_(channelId, afterId)
+        if (typeof fetchChannelMessages_ === 'function') {
+          resp = fetchChannelMessages_(ch, after);
+        } else {
+          // If you only have a generic relayFetch_, you can implement a local wrapper.
+          throw new Error('fetchChannelMessages_ not defined');
+        }
+      } catch (e) {
+        try { logLocal_('ERROR','poll.fetch.fail',{ channelId:ch, err:String(e&&e.message||e) }); } catch(_){}
+        break;
+      }
+
+      var msgs = _msgsFromRelay_(resp);
+      if (!msgs.length) break;
+
+      // Assume relay returns oldest→newest; if not, sort by known timestamp/id
+      for (var i=0;i<msgs.length;i++){
+        var m = msgs[i];
+        var id = _idFromMsg_(m);
+        // Process
+        var s = processInboundMessage_(m, wkKey, week);
+        totals.messages++;
+        if (s.did && s.did.schedule) totals.scheduleApplied++;
+        if (s.did && s.did.caster) totals.casterApplied++;
+        // Advance pointer
+        if (id) lastProcessed = id;
+      }
+
+      // Prepare for next page
+      if (lastProcessed && lastProcessed !== after) {
+        after = lastProcessed;
+      } else {
+        more = false;
+      }
+    }
+
+    if (lastProcessed && lastProcessed !== getLastSeenId_(ch)) {
+      setLastSeenId_(ch, lastProcessed);
+    }
+  }
+
+  // Touch header if we applied any update
+  if (wkKey && (totals.scheduleApplied || totals.casterApplied)) {
+    try { var t = touchWeeklyHeaderTimestamp_(wkKey, week); totals.touchedHeader = !!(t && t.ok); } catch(_){}
+  }
+
+  try { logLocal_('INFO','poll.summary', totals); } catch(_){}
+  return totals;
+}
+

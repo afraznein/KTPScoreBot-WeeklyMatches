@@ -63,12 +63,23 @@ const DEFER_SC_REACTIONS        = true;            // do shoutcaster pass after 
 
 // ---- WEB APP CONTROL PANEL ----
 //CODE_TO_GENERATE_SECRET = 'node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"';
-const WM_WEBAPP_SHARED_SECRET = CFG_('WM_WEBAPP_SHARED_SECRET', 'WEBAPP_SECRET_FALLBACKSHARED');
+const WM_WEBAPP_SHARED_SECRET = CFG_('WM_WEBAPP_SHARED_SECRET', 'WEBAPP_SECRET_FALLBACK');
 
 // ---- EMBED STYLE (for header) ----
 const EMBED_COLOR = (function(){ var v = CFG_('EMBED_COLOR', null); if (!v) return 0x48C9B0; try { if (String(v).startsWith('0x')) return parseInt(v); return parseInt(v,10); } catch(_){ return 0x48C9B0; } })();              // teal-ish
 const EMBED_ICON_URL = CFG_('EMBED_ICON_URL', '');                    // optional small icon
 const EMBED_BANNER_URL = CFG_('EMBED_BANNER_URL', '');                    // optional banner image
+
+/*---------------------------------------------------*/
+// Sheet functions need to be at the highest level
+
+let __SS = null;
+function ss_(){ return __SS || (__SS = SpreadsheetApp.openById(SPREADSHEET_ID)); }
+
+function getSheetByName_(div){ 
+  const ss = ss_(); 
+  return ss.getSheetByName(div); 
+}
 
 // Throws with a clear message if anything necessary is missing/misconfigured.
 function verifyConfig_() {
@@ -85,7 +96,7 @@ function verifyConfig_() {
   var sheetId = req('SPREADSHEET_ID');
   var weeklyCh = req('WEEKLY_POST_CHANNEL_ID');
   // Relay base URL strongly recommended
-  if (!sp.getProperty('RELAY_BASE_URL')) errs.push('Missing Script Property: RELAY_BASE_URL');
+  if (!sp.getProperty('RELAY_BASE')) errs.push('Missing Script Property: RELAY_BASE');
 
   // Division tabs must exist
   var divs = [];

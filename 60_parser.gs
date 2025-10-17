@@ -23,47 +23,150 @@ function parseScheduleMessage_(text) {
   return parseScheduleMessage_v2(text);
 }
 
-function parseScheduleMessage_v2(text) {
-  var clean = stripDiscordUsers_(String(text || ''));
-  var idx = getTeamIndexCached_();
-  var lines = clean.split(/\r?\n/);
-  var weekKey = (typeof weekKey_ === 'function') ? weekKey_(new Date()) : isoWeekKey_(new Date());
+/**
+ * Parse a message (string | string[] | {content:string}) into matchup pairs.
+ * Uses parseLineForMatchup_ so prod == panel debug behavior.
+ *
+ * Returns:
+ * {
+ *   ok: boolean,
+ *   pairs: [{ division, home, away, whenIso, sourceLine }],
+ *   errors: [{ line, reason }],
+ *   stats: { linesTotal, linesScanned, pairs, divisions: { Bronze:n, Silver:n, Gold:n } }
+ * }
+ */
+function parseScheduleMessage_v2(input, opts) {
+  opts = opts || {};
+  var tz = (typeof getTz_ === 'function') ? getTz_() : 'America/New_York';
 
+  // --- Normalize input to an array of lines
+  var lines = [];
+  if (Array.isArray(input)) {
+    lines = input.slice();
+  } else if (input && typeof input === 'object' && typeof input.content === 'string') {
+    lines = String(input.content).split(/\r?\n/);
+  } else {
+    lines = String(input || '').split(/\r?\n/);
+  }
+
+  // --- Helpers
+  function stripDiscordNoise_(s) {
+    var t = String(s || '');
+    // remove <@123>, <@!123>, <#chan>, <@&role>, <a:emoji:ID>, <:emoji:ID>
+    t = t.replace(/<[@#][!&]?\d+>/g, ' ');
+    t = t.replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, ' ');
+    // remove @username-ish words (loose)
+    t = t.replace(/(^|\s)@[\w\-]+/g, ' ');
+    // collapse spaces
+    return t.replace(/\s+/g, ' ').trim();
+  }
+
+  function dedupePairs_(arr) {
+    var seen = Object.create(null);
+    var out = [];
+    for (var i = 0; i < arr.length; i++) {
+      var p = arr[i];
+      var key = [p.division || '', p.home || '', p.away || '', p.whenIso || ''].join('|').toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = 1;
+      out.push(p);
+    }
+    return out;
+  }
+
+  // --- Main loop
   var outPairs = [];
   var errs = [];
+  var scanned = 0;
 
- for (var i = 0; i < lines.length; i++) {
-  var raw = lines[i];
-  var line = raw.trim();
-  if (!line) continue;
+  for (var li = 0; li < lines.length; li++) {
+    var raw = lines[li];
 
-  var hintDiv = detectDivisionHint_(line); // "Bronze" | "Silver" | "Gold" | ''
+    // skip empty / separator / boilerplate
+    if (!/\S/.test(raw)) continue;
+    if (/^```/.test(raw)) continue; // ignore fenced blocks
+    if (/^\s*[-=]{3,}\s*$/.test(raw)) continue;
 
-  var matches = matchTeamsInLine_(line, idx);
-  if (matches.length >= 2) {
-    var a = matches[0];
-    var b = null;
-    for (var k = 1; k < matches.length; k++) { if (matches[k].id !== a.id) { b = matches[k]; break; } }
-    if (!b) { errs.push({ line: raw, reason: 'one_team_only', team: a && a.name }); continue; }
+    scanned++;
 
-    // If a division is hinted, retarget each team to that division if there’s a duplicate across sheets
-    if (hintDiv) {
-      if (a.division !== hintDiv) a = retargetTeamToDivision_(a, idx, hintDiv) || a;
-      if (b.division !== hintDiv) b = retargetTeamToDivision_(b, idx, hintDiv) || b;
+    var line = stripDiscordNoise_((raw || ''));
+
+    // division hint from text if helper exists
+    var hintDiv = (typeof detectDivisionHint_ === 'function') ? detectDivisionHint_(line) : null;
+
+    // use the same core parser as the panel
+    var r = parseLineForMatchup_(line, { hintDivision: hintDiv });
+
+    if (r && r.ok && r.matches && r.matches.length >= 2) {
+      var A = r.matches[0];
+      var B = r.matches[1];
+
+      // Skip BYE pairs
+      if (String(A.name || '').toUpperCase() === 'BYE' || String(B.name || '').toUpperCase() === 'BYE') {
+        errs.push({ line: raw, reason: 'bye_pair_ignored' });
+        continue;
+      }
+
+      var div = r.finalDivision || hintDiv || null;
+      if (!div) {
+        errs.push({ line: raw, reason: 'division_undetermined' });
+        continue;
+      }
+
+      // prefer the parser's time; if not present, fall back to your when parser
+      var whenIso = (r.when && (r.when.iso || r.when.text)) ? (r.when.iso || r.when.text) : null;
+      if (!whenIso && typeof parseWhenInLine_ === 'function') {
+        try { whenIso = parseWhenInLine_(line, new Date()); } catch (_){}
+      }
+
+      outPairs.push({
+        division: div,
+        home: A.name,
+        away: B.name,
+        whenIso: whenIso || '',   // keep empty string if still unknown; scheduler can default to 9pm on week date
+        sourceLine: raw
+      });
+    } else {
+      errs.push({ line: raw, reason: (r && r.reason) || 'no_pair' });
     }
-
-    var div = (a.division === b.division) ? a.division : (hintDiv || null);
-    div = canonDivision_(div) || null;   
-    if (!div) { errs.push({ line: raw, reason: 'division_ambiguous', teams: [a.name+'('+a.division+')', b.name+'('+b.division+')'] }); continue; }
-
-    var when = parseWhenInLine_(line, new Date());
-    outPairs.push({ division: div, home: a.name, away: b.name, when: when, sourceLine: raw });
-  } 
-  else {
-    errs.push({ line: raw, reason: 'no_pair' });
   }
+
+  // dedupe and compile stats
+  outPairs = dedupePairs_(outPairs);
+
+  var divCounts = { Bronze: 0, Silver: 0, Gold: 0 };
+  for (var i = 0; i < outPairs.length; i++) {
+    var d = String(outPairs[i].division || '');
+    if (d === 'Bronze' || d === 'Silver' || d === 'Gold') divCounts[d]++;
+  }
+
+  var result = {
+    ok: outPairs.length > 0,
+    pairs: outPairs,
+    errors: errs,
+    stats: {
+      linesTotal: lines.length,
+      linesScanned: scanned,
+      pairs: outPairs.length,
+      divisions: divCounts
+    }
+  };
+
+  // sheet log (non-fatal if missing)
+  try {
+    logLocal_('INFO', 'parse.v2.summary', {
+      ok: result.ok,
+      totals: result.stats,
+      example: outPairs[0] || null
+    });
+  } catch (_){}
+
+  return result;
 }
-return { weekKey: weekKey, pairs: outPairs, errors: errs };
+
+
+function parseMessageLine_(text, hintDivision) {
+  return parseLineForMatchup_(String(text||''), { hintDivision: hintDivision||null, trace:false });
 }
 
 // ---------------- Pre-sanitize ----------------
@@ -95,8 +198,6 @@ function getTeamIndexCached_() {
  * Tries to use existing helpers if present; otherwise reads sheets directly.
  */
 function fetchRosterSnapshot_() {
-  if (typeof loadTeamRosterSnapshot_ === 'function') return loadTeamRosterSnapshot_();
-
   var out = [];
   var _DIVS = getDivisionSheets_();        // already in your parser
   for (var d = 0; d < _DIVS.length; d++) {
@@ -332,56 +433,142 @@ function matchTeamsInLine_withReasons_(line, idx) {
 }
 
 // ---------------- Time parsing (cheap) ----------------
+// REPLACE parseWhenInLine_ with this version (month names + last time wins + PM default)
 function parseWhenInLine_(line, refDate) {
-  var tz = getTz_();
-  var text = String(line || '').toLowerCase();
+  var tz = (typeof getTz_ === 'function') ? getTz_() : 'America/New_York';
+  var s  = String(line || '');
 
-  // date (e.g., 9/28 or 09/28[/2025])
-  var when = new Date(refDate || new Date());
-  var dm = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
-  if (dm) {
-    var m = parseInt(dm[1], 10) - 1;
-    var d = parseInt(dm[2], 10);
-    var y = dm[3] ? parseInt(dm[3], 10) : when.getFullYear();
-    if (y < 100) y += 2000;
-    when = new Date(y, m, d, 0, 0, 0, 0);
-  } else {
-    when = startOfWeek_(refDate || new Date());
-    var wd = dayIndex_(text);
-    if (wd >= 0) when.setDate(when.getDate() + wd);
+  // ---- Base date ----
+  var whenBase = refDate ? new Date(refDate) : new Date();
+  var y = null, m = null, d = null;
+
+  // Month-name date: "October 5, 2025" (year optional)
+  var mName = s.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:,\s*(\d{4}))?/i);
+  if (mName) {
+    var months = {january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11};
+    m = months[mName[1].toLowerCase()];
+    d = parseInt(mName[2], 10);
+    y = mName[3] ? parseInt(mName[3], 10) : whenBase.getFullYear();
   }
 
-  // time parsing (AM/PM, HH:MM, “9est/930est”) — default PM if none
-  var t1 = text.match(/\b(\d{1,2})(?::?(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b/);
-  var h = 20, mm = 0;
-  if (t1) {
-    h = parseInt(t1[1], 10); mm = t1[2] ? parseInt(t1[2], 10) : 0;
-    if (/p/i.test(t1[3]) && h < 12) h += 12;
-    if (/a/i.test(t1[3]) && h === 12) h = 0;
-  } else {
-    var t2 = text.match(/\b(\d{1,2}):(\d{2})\b/);
-    if (t2) {
-      h = parseInt(t2[1], 10); mm = parseInt(t2[2], 10);
-      if (h <= 12) h = (h % 12) + 12;
-    } else {
-      var t3 = text.match(/\b(\d{1,2})(\d{2})?\s*(e[ds]t)\b/);
-      if (t3) {
-        h = parseInt(t3[1], 10); mm = t3[2] ? parseInt(t3[2], 10) : 0;
-        if (h <= 12) h = (h % 12) + 12;
-      } else {
-        var t4 = text.match(/\b(\d{1,2})\s*(e[ds]t)\b/);
-        if (t4) { h = parseInt(t4[1], 10); mm = 0; if (h <= 12) h = (h % 12) + 12; }
-        else return null;
-      }
+  // Numeric date: 10/5 or 10-05-2025
+  if (y == null && m == null && d == null) {
+    var dm = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+    if (dm) {
+      m = parseInt(dm[1], 10) - 1;
+      d = parseInt(dm[2], 10);
+      y = dm[3] ? (function(v){ v = String(v); return v.length === 2 ? (2000 + parseInt(v,10)) : parseInt(v,10); })(dm[3]) : whenBase.getFullYear();
     }
   }
 
-  when.setHours(h, mm, 0, 0);
-  return toIsoInTz_(when, tz);
+  var when;
+  if (y != null && m != null && d != null) {
+    when = new Date(y, m, d, 0, 0, 0, 0);
+  } else {
+    // Fallback to your existing DOW logic: "sunday, monday, ..." in current week
+    var low = s.toLowerCase();
+    if (typeof startOfWeek_ === 'function' && typeof dayIndex_ === 'function') {
+      when = startOfWeek_(whenBase || new Date());
+      var wd = dayIndex_(low);
+      if (wd >= 0) when = new Date(when.getFullYear(), when.getMonth(), when.getDate() + wd, 0, 0, 0, 0);
+      else when = new Date(whenBase);
+    } else {
+      when = new Date(whenBase);
+    }
+  }
+
+  // ---- Time candidates ----
+  var candidates = [];
+  // explicit am/pm
+  var reAP = /\b(\d{1,2})(?:[:\.](\d{2}))?\s*(am|pm)\b/ig, mAP;
+  var m_;
+  while ((m_ = reAP.exec(s)) !== null) {
+    candidates.push({ kind:'ap', hh:parseInt(m_[1],10), mm:parseInt(m_[2]||'0',10), ap:m_[3].toLowerCase(), pos:m_.index });
+  }
+  // HH:MM without am/pm
+  var reHM = /\b(\d{1,2})[:\.](\d{2})\b/g, mHM;
+  while ((mHM = reHM.exec(s)) !== null) {
+    candidates.push({ kind:'hm', hh:parseInt(mHM[1],10), mm:parseInt(mHM[2],10), ap:null, pos:mHM.index });
+  }
+  // compact 3–4 digit (930 / 0930 / 1230), optionally followed by ET/EST/PM/AM
+  var reC = /\b(\d{3,4})(?:\s*(et|est|pm|am))?\b/ig, mC;
+  while ((mC = reC.exec(s)) !== null) {
+    var raw = mC[1], ap2 = (mC[2]||'').toLowerCase();
+    var hh2 = (raw.length===3) ? parseInt(raw.charAt(0),10) : parseInt(raw.slice(0,2),10);
+    var mm2 = (raw.length===3) ? parseInt(raw.slice(1),10)  : parseInt(raw.slice(2),10);
+    if (hh2 >= 1 && hh2 <= 12 && mm2 <= 59) candidates.push({ kind:'compact', hh:hh2, mm:mm2, ap:ap2||null, pos:mC.index });
+  }
+
+  // choose best (ap > hm > compact), and last occurrence if tie
+  function better(a,b){
+    var rank = { ap:3, hm:2, compact:1 };
+    if (!a) return b;
+    if (!b) return a;
+    if (rank[b.kind] !== rank[a.kind]) return (rank[b.kind] > rank[a.kind]) ? b : a;
+    return (b.pos >= a.pos) ? b : a;
+  }
+  var chosen = null;
+  for (var i=0;i<candidates.length;i++) chosen = better(chosen, candidates[i]);
+
+  var hh24 = 21, mmF = 0; // default to 9:00 PM if no time
+  if (chosen) {
+    var hh = chosen.hh, ap = chosen.ap;
+    mmF = chosen.mm;
+    if (!ap) ap = 'pm';
+    var h = (hh % 12);
+    if (ap === 'pm') h += 12;
+    if (ap === 'am' && hh === 12) h = 0;
+    hh24 = h;
+  }
+  when.setHours(hh24, mmF, 0, 0);
+
+  return (typeof toIsoInTz_ === 'function') ? toIsoInTz_(when, tz) : when.toISOString();
 }
 
+function parseLineForMatchup_(line, opts) {
+  opts = opts || {};
+  var idx = getTeamIndexCached_();
+  var hint = opts.hintDivision || detectDivisionHint_(line);
+
+  // collect matches (rich) and pick first two distinct
+  var found = (typeof matchTeamsInLine_withReasons_ === 'function')
+              ? matchTeamsInLine_withReasons_(line, idx)
+              : matchTeamsInLine_(line, idx);
+
+  var a = found[0] || null, b = null;
+  if (a) for (var i=1;i<found.length;i++){ if (found[i].team ? (found[i].team.id !== a.team.id) : (found[i].name !== a.name)) { b = found[i]; break; } }
+
+  // normalize to {name, division}
+  function normT(x){ return x ? (x.team ? x.team : x) : null; }
+  var A = normT(a), B = normT(b);
+
+  var finalDiv = null;
+  if (A && B && A.division && B.division && A.division === B.division) finalDiv = A.division;
+  if (!finalDiv && hint) finalDiv = hint;
+
+  var whenIso = parseWhenInLine_(line, new Date());
+
+  var decision = (!A || !B) ? 'no_pair' : (!finalDiv ? 'division_undetermined' : 'accept');
+  var reason = (decision === 'accept') ? 'ok' : (decision === 'no_pair' ? 'found_less_than_two_teams' : 'could_not_determine_division');
+
+  return {
+    ok: decision === 'accept',
+    line: String(line||''),
+    hintDivision: hint || null,
+    matches: [A,B].filter(Boolean).map(function(t){
+      return { name: t.name, division: t.division, by: (a&&a.by)||null, token: (a&&a.token)||null, emoji: (a&&a.emoji)||null };
+    }),
+    chosen: (A && B) ? { a: A.name + (A.division?(' ('+A.division+')'):''),
+                         b: B.name + (B.division?(' ('+B.division+')'):'') } : null,
+    finalDivision: finalDiv || null,
+    when: { iso: whenIso },
+    decision: decision,
+    reason: reason
+  };
+}
+
+
 // ---------------- Division Helpers ----------------
-// (removed simpler duplicate detectDivisionHint_)
 
 function tagToDiv_(ch) {
   ch = String(ch || '').toLowerCase();
@@ -464,16 +651,6 @@ function acronym_(tokens) {
 
 // ---------------- Debug helpers ----------------
 
-function _parser_smoketest() {
-  var sample = [
-    "GOLD: EMO vs LA Bears 8:30",
-    "[s] Emo Frag SquaD vs Knights 9:00",
-    "bronze - :emo_frag: vs :la_bears: 20:15"
-  ].join("\n");
-  var res = parseScheduleMessage_(sample);
-  Logger.log(JSON.stringify(res, null, 2));
-}
-
 function _parser_index_check() {
   var idx = getTeamIndexCached_();
   Logger.log('teams=' + (idx.teams && idx.teams.length));
@@ -537,13 +714,6 @@ function resetCache(){
   _resetTeamIndexCacheOnce_();
 }
 
-function RunDebugOnSampleLine() {
-  // Replace this sample with a real failing line from Discord
-  var sample = "@chi @JgNatoRcJm dod_railyard_b6 gskill vs icyhot 9/28 9est";
-  var res = parser_debugLine_(sample);
-  Logger.log(JSON.stringify(res, null, 2));
-}
-
 function resolveEmojiNameToTeam_(emojiName, idx){
   var s = String(emojiName||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
   if (!s || !idx || !idx.teams) return null;
@@ -560,6 +730,416 @@ function resolveEmojiNameToTeam_(emojiName, idx){
   return best.i;
 }
 
+function parseDebug_(line, hintDivision) {
+  var res = null, err = null;
+  try {
+    res = parseLineForMatchup_(String(line||''), { hintDivision: hintDivision||null, trace:true });
+  } catch (e) {
+    err = String(e && e.message || e);
+  }
+  try { logLocal_('INFO','parse.debug',{ line:line, hint:hintDivision||null, result:res, error:err }); } catch(_) {}
+  return res || { ok:false, reason: err||'no_result' };
+}
 
-// Back-compat alias
-function loadTeamRosterSnapshot_(){ return fetchRosterSnapshot_(); }
+/***********************
+ * Minimal utilities (safe fallbacks if your project already defines them)
+ ***********************/
+function _norm_(s) {
+  try { if (typeof normalizeText_ === 'function') return normalizeText_(s); } catch(_){}
+  s = String(s || '').toLowerCase();
+  s = s.normalize ? s.normalize('NFD').replace(/[\u0300-\u036f]/g,'') : s;
+  return s.replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function _whenString_(text) {
+  try { if (typeof whenStringFromText_ === 'function') return whenStringFromText_(text); } catch(_){}
+  // fallback: very simple "9", "930", "9:30", "... am/pm", plus date like 10/5[/2025]
+  var s = String(text||'');
+  var mDate = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+  var dateStr = mDate ? mDate[0] : '';
+  var mTime = s.match(/\b(\d{1,2})(?::?(\d{2}))?\s*(am|pm)?\b/i);
+  var hh=null, mm='00', ap=null;
+  if (mTime) {
+    hh = parseInt(mTime[1],10);
+    if (mTime[2]) mm = mTime[2];
+    ap = (mTime[3]||'').toLowerCase();
+  } else {
+    var mc = s.match(/\b(\d{3,4})\b/);
+    if (mc) {
+      var t = mc[1];
+      if (t.length===3){ hh=parseInt(t.charAt(0),10); mm=t.slice(1); }
+      else { hh=parseInt(t.slice(0,2),10); mm=t.slice(2); }
+    }
+  }
+  if (hh==null) return dateStr || '';
+  if (!ap) ap = 'pm';
+  ap = ap.toUpperCase();
+  mm = ('0'+String(parseInt(mm,10)||0)).slice(-2);
+  var displayH = (hh%12)===0 ? 12 : (hh%12);
+  var timeStr = displayH + ':' + mm + ' ' + ap + ' ET';
+  return (dateStr ? (dateStr+' ') : '') + timeStr;
+}
+function _canonDiv_(d) {
+  var s = String(d||'').toLowerCase();
+  if (/bronze/.test(s)) return 'Bronze';
+  if (/silver/.test(s)) return 'Silver';
+  if (/gold/.test(s))   return 'Gold';
+  return '';
+}
+function _getDivisions_() {
+  try { if (typeof getDivisionSheets_==='function') return getDivisionSheets_(); } catch(_){}
+  return ['Bronze','Silver','Gold'];
+}
+
+/***********************
+ * Team index access
+ ***********************/
+function _getTeamIndex_() {
+  try {
+    if (typeof getTeamIndexCached_ === 'function') {
+      var idx = getTeamIndexCached_();
+      if (idx && idx.teams && idx.teams.length) return idx;
+    }
+  } catch(_){}
+  return { teams: [] };
+}
+
+/***********************
+ * Division inference from text or hint
+ ***********************/
+function _divisionFromTextOrHint_(line, hintDivision) {
+  var fromHint = _canonDiv_(hintDivision);
+  if (fromHint) return fromHint;
+  var s = _norm_(line);
+  if (/\bbronze\b/.test(s)) return 'Bronze';
+  if (/\bsilver\b/.test(s)) return 'Silver';
+  if (/\bgold\b/.test(s))   return 'Gold';
+  return '';
+}
+
+/***********************
+ * Emoji tokens :something_like_this:
+ ***********************/
+function _emojiTokens_(line) {
+  var out = [];
+  var re = /:([a-z0-9_]+):/gi, m;
+  while ((m = re.exec(String(line||''))) !== null) out.push(m[1].toLowerCase());
+  return out;
+}
+
+/***********************
+ * Team matching (full, partial, emoji)
+ ***********************/
+function _scoreTeamAgainstLine_(team, lineNorm, emojis) {
+  var score = 0;
+  var name = String(team.name||'');
+  var div  = String(team.division||'');
+  var nName = _norm_(name);               // "emo frag sqaud"
+  var words = nName.split(' ').filter(function(w){ return w.length>=3; });
+
+  // Strong: full normalized name as a whole-word substring
+  if (nName && lineNorm.indexOf(nName) >= 0) score += 10;
+
+  // Medium: any >=3 char word appears
+  for (var i=0;i<words.length;i++){
+    if (lineNorm.indexOf(words[i]) >= 0) score += 3;
+  }
+
+  // Emoji hint: if an emoji token is a substring of the normalized team name (or vice versa)
+  for (var j=0;j<emojis.length;j++){
+    var e = emojis[j];
+    if (!e || e.length<3) continue;
+    if (nName.indexOf(e) >= 0 || e.indexOf(nName.replace(/\s+/g,'_')) >= 0) score += 5;
+  }
+
+  return score;
+}
+
+function _findTeamsInLine_(line, divHint) {
+  var idx = _getTeamIndex_();
+  var emojis = _emojiTokens_(line);
+  var lineNorm = _norm_(line);
+  var divPref = _canonDiv_(divHint);
+  var candidates = [];
+
+  for (var i=0;i<idx.teams.length;i++){
+    var t = idx.teams[i];
+    if (!t || !t.name) continue;
+    if (divPref && _canonDiv_(t.division) !== divPref) {
+      // prefer hinted division; but still allow if score is very high — handled in ranking
+    }
+    var sc = _scoreTeamAgainstLine_(t, lineNorm, emojis);
+    if (sc>0) candidates.push({ team:t, score:sc });
+  }
+
+  // Rank: by score, then prefer matching division if tie-ish
+  candidates.sort(function(a,b){
+    if (b.score !== a.score) return b.score - a.score;
+    var ad = _canonDiv_(a.team.division), bd = _canonDiv_(b.team.division);
+    if (divPref) {
+      var ai = (ad===divPref)?0:1, bi = (bd===divPref)?0:1;
+      if (ai!==bi) return ai - bi;
+    }
+    return String(a.team.name).localeCompare(String(b.team.name));
+  });
+
+  // Pick top two distinct team names (avoid same team twice)
+  var out = [];
+  for (var k=0;k<candidates.length && out.length<2;k++){
+    var nm = candidates[k].team.name;
+    if (out.length===0 || out[0].team.name !== nm) out.push(candidates[k]);
+  }
+  return out.map(function(x){
+    return {
+      name: x.team.name,
+      division: _canonDiv_(x.team.division) || x.team.division || '',
+      by: 'score',
+      token: null,
+      emoji: emojis.length ? emojis.join(',') : null,
+      _score: x.score
+    };
+  });
+}
+
+/***********************
+ * Week/date anchoring (optional if helpers exist)
+ ***********************/
+function _currentWeekMeta_() {
+  var meta = { dateISO:'', map:'' };
+  try {
+    var week = (typeof getAlignedUpcomingWeekOrReport_==='function') ? getAlignedUpcomingWeekOrReport_() : null;
+    if (week && typeof chooseWeekMetaAcrossDivisions_==='function') {
+      var m = chooseWeekMetaAcrossDivisions_(week);
+      if (m && m.dateISO) { meta.dateISO = m.dateISO; meta.map = m.map||''; return meta; }
+    }
+    if (week && week.weekKey && week.weekKey.indexOf('|')>-1) {
+      meta.dateISO = week.weekKey.split('|')[0];
+      meta.map = week.weekKey.split('|')[1] || '';
+      return meta;
+    }
+  } catch(_){}
+  return meta;
+}
+
+/***********************
+ * Main entry
+ ***********************/
+function parseLineForMatchup_(line, opts) {
+  opts = opts || {};
+  var divisions = _getDivisions_();
+  var hintDiv = _canonDiv_(opts.hintDivision);
+  var divFromText = _divisionFromTextOrHint_(line, null);
+  var div = hintDiv || divFromText || '';
+
+  var matches = _findTeamsInLine_(line, div);
+  if (matches.length < 2) {
+    return { ok:false, line:line, hintDivision:opts.hintDivision||null, matches:matches, decision:'no_pair', reason:'found_less_than_two_teams' };
+  }
+
+  var a = matches[0], b = matches[1];
+  var finalDiv = div || ((a.division && b.division && a.division===b.division) ? a.division : (a.division||b.division||''));
+
+  // get week ISO for better date anchoring
+  var wkISO = (function(){
+    try {
+      var w = (typeof getAlignedUpcomingWeekOrReport_==='function') ? getAlignedUpcomingWeekOrReport_() : null;
+      if (w && w.weekKey && w.weekKey.indexOf('|')>-1) return w.weekKey.split('|')[0];
+      if (typeof chooseWeekMetaAcrossDivisions_==='function') {
+        var m = chooseWeekMetaAcrossDivisions_(w);
+        if (m && m.dateISO) return m.dateISO;
+      }
+    } catch(_){}
+    return null;
+  })();
+
+  var whenText = _whenString_(line, wkISO);
+
+  return {
+    ok: true,
+    line: line,
+    hintDivision: opts.hintDivision || null,
+    matches: matches,
+    chosen: { a: a.name + (a.division?(' ('+a.division+')'):''),
+              b: b.name + (b.division?(' ('+b.division+')'):'') },
+    finalDivision: finalDiv || null,
+    when: { text: whenText },  // your scheduler can still build epochSec (default 9pm) from the aligned week
+    decision: finalDiv ? 'accept' : 'division_undetermined',
+    reason: finalDiv ? 'ok' : 'could_not_determine_division'
+  };
+}
+
+
+/***********************
+ * Debug wrapper (if you didn't add it yet)
+ ***********************/
+function parseDebug_(line, hintDivision) {
+  var res = null, err = null;
+  try {
+    res = parseLineForMatchup_(String(line||''), { hintDivision: hintDivision||null, trace:true });
+  } catch (e) {
+    err = String(e && e.message || e);
+  }
+  try { logLocal_('INFO','parse.debug',{ line:line, hint:hintDivision||null, result:res, error:err }); } catch(_) {}
+  return res || { ok:false, reason: err||'no_result' };
+}
+
+function parseLine_(text, hintDivision) {
+  return parseLineForMatchup_(String(text||''), { hintDivision: hintDivision||null, trace:false });
+}
+
+function parseMessageLine_(text, hintDivision) {
+  return parseLineForMatchup_(String(text||''), { hintDivision: hintDivision||null, trace:false });
+}
+
+function _whenString_(text, weekISO) {
+  var s = String(text||'');
+
+  // ---- DATE ----
+  var y=null,m=null,d=null;
+
+  // Month-name date: "October 5, 2025" (year optional)
+  var mName = s.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:,\s*(\d{4}))?/i);
+  if (mName) {
+    var months = {january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11};
+    m = months[mName[1].toLowerCase()];
+    d = parseInt(mName[2],10);
+    y = mName[3] ? parseInt(mName[3],10) : null;
+  }
+
+  // Numeric date: 10/5 or 10-05-2025
+  if (y==null && m==null && d==null) {
+    var mNum = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+    if (mNum) {
+      m = parseInt(mNum[1],10)-1;
+      d = parseInt(mNum[2],10);
+      y = mNum[3] ? (function(v){ v=String(v); return v.length===2 ? (2000+parseInt(v,10)) : parseInt(v,10); })(mNum[3]) : null;
+    }
+  }
+
+  // Fallback date from weekISO
+  if ((y==null || m==null || d==null) && weekISO) {
+    var p = String(weekISO).split('-');
+    if (p.length>=3) { y = parseInt(p[0],10); m = parseInt(p[1],10)-1; d = parseInt(p[2],10); }
+  }
+
+  // If still no date, we'll return time only in text; epoch will be null.
+
+  // ---- TIME (choose best & last) ----
+  var timeCandidates = [];
+
+  // 1) explicit am/pm (best)
+  var reAP = /\b(\d{1,2})(?:[:\.](\d{2}))?\s*(am|pm)\b/ig, mAP;
+  while ((mAP = reAP.exec(s)) !== null) {
+    timeCandidates.push({ kind: 'ap', hh: parseInt(mAP[1],10), mm: parseInt(mAP[2]||'0',10), ap: mAP[3].toLowerCase(), pos: mAP.index });
+  }
+
+  // 2) HH:MM without am/pm
+  var reHM = /\b(\d{1,2})[:\.](\d{2})\b/g, mHM;
+  while ((mHM = reHM.exec(s)) !== null) {
+    timeCandidates.push({ kind: 'hm', hh: parseInt(mHM[1],10), mm: parseInt(mHM[2],10), ap: null, pos: mHM.index });
+  }
+
+  // 3) compact 3–4 digit times (e.g., 930, 0930, 1230) — *only* if followed by timezone tokens or near end
+  var reC = /\b(\d{3,4})(?:\s*(et|est|pm|am))?\b/ig, mC;
+  while ((mC = reC.exec(s)) !== null) {
+    var raw = mC[1], ap = (mC[2]||'').toLowerCase();
+    var hh = (raw.length===3) ? parseInt(raw.charAt(0),10) : parseInt(raw.slice(0,2),10);
+    var mm = (raw.length===3) ? parseInt(raw.slice(1),10)  : parseInt(raw.slice(2),10);
+    // Heuristic: ignore compact numbers that are obviously part of a date like "October 5"
+    if (mm<=59 && hh>=1 && hh<=12) {
+      timeCandidates.push({ kind: 'compact', hh: hh, mm: mm, ap: ap||null, pos: mC.index });
+    }
+  }
+
+  // Choose best by priority (ap > hm > compact), and if tie, the LAST occurrence
+  var chosen = null;
+  function better(a,b){
+    var rank = { ap:3, hm:2, compact:1 };
+    if (!a) return b;
+    if (!b) return a;
+    if (rank[b.kind] !== rank[a.kind]) return (rank[b.kind] > rank[a.kind]) ? b : a;
+    return (b.pos >= a.pos) ? b : a;
+  }
+  for (var i=0;i<timeCandidates.length;i++) chosen = better(chosen, timeCandidates[i]);
+
+  var tzText = 'ET';
+  var hh = null, mm = null;
+  if (chosen) {
+    hh = chosen.hh; mm = chosen.mm;
+    var ap = chosen.ap;
+    if (!ap) ap = 'pm'; // default PM if unspecified
+    var displayH = (hh%12)===0 ? 12 : (hh%12);
+    var mmStr = ('0'+mm).slice(-2);
+    var timeStr = displayH + ':' + mmStr + ' ' + ap.toUpperCase() + ' ' + tzText;
+
+    // Build text and epoch if we also have a date
+    var dateStr = '';
+    if (y!=null && m!=null && d!=null) {
+      // Short date for text; you can swap to long if you prefer
+      dateStr = (m+1) + '/' + d + '/' + y;
+      var h24 = displayH % 12 + (ap==='pm' ? 12 : 0);
+      if (ap==='am' && displayH===12) h24 = 0;
+      var dt = new Date(y, m, d, h24, mm, 0, 0);
+      return dateStr + ' ' + timeStr; // human text; epoch provided via separate helper in your code if needed
+    }
+    return timeStr; // time only
+  } else {
+    // No explicit time; if we have a date, you’ll schedule default 9:00 PM elsewhere
+    if (y!=null && m!=null && d!=null) return (m+1)+'/'+d+'/'+y;
+    return '';
+  }
+}
+
+/**
+ * Parse ":shoutcast: dod_map team1 vs team2"
+ * Returns { ok, map, home, away, reason } on success/failure.
+ */
+function parseShoutcastCommand_(line) {
+  var s = String(line || '');
+  // Must contain "shoutcast" somehow (emoji or plain)
+  if (!/shoutcast/i.test(s)) {
+    return { ok:false, reason:'no_shoutcast_token' };
+  }
+
+  // Extract map token like dod_anzio / dod_railyard_b6
+  var mMap = s.match(/\b(dod_[a-z0-9_]+)\b/i);
+  var map = mMap ? mMap[1].toLowerCase() : '';
+
+  // Remove obvious noise (mentions, emojis)
+  var cleaned = s
+    .replace(/<[@#][!&]?\d+>/g, ' ')
+    .replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, ' ')
+    .replace(/(^|\s)@[\w\-]+/g, ' ')
+    .replace(/:shoutcast:/ig, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Let the normal line parser find the two teams
+  var r = (typeof parseLineForMatchup_==='function')
+        ? parseLineForMatchup_(cleaned, { trace:false })
+        : null;
+
+  if (!r || !r.matches || r.matches.length < 2) {
+    return { ok:false, reason:'no_pair' };
+  }
+
+  var A = r.matches[0], B = r.matches[1];
+  if (!A || !B) return { ok:false, reason:'no_pair' };
+
+  // BYE guard
+  if (String(A.name||'').toUpperCase() === 'BYE' || String(B.name||'').toUpperCase() === 'BYE') {
+    return { ok:false, reason:'bye_pair_ignored' };
+  }
+
+  return { ok:true, map: map, home: A.name, away: B.name };
+}
+
+// 60_parser.gs (or 20_relay.gs—where you process inbound messages)
+function tryStoreTwitchFromText_(userId, username, text) {
+  var m = String(text||'').match(/\bhttps?:\/\/(?:www\.)?twitch\.tv\/[A-Za-z0-9_]+/i);
+  if (!m) return false;
+  setTwitchForUser_(userId, username||'', m[0]);
+  try { logLocal_('INFO','twitch.saved',{ userId:userId, url:m[0] }); } catch(_){}
+  return true;
+}
+
+

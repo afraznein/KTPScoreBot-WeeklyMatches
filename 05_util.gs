@@ -4,32 +4,31 @@
 // =======================
 
 // ----- DATE HELPERS -----
+
+// Extract a Date from text like 9/28, 09-28-2025, or "Sep 28"
 function parseDateFromText_(text, refYear) {
-  var tz = getTz_();
   var s = String(text||'');
-  var m = s.match(/\b(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?\b/); // 9/28 or 09-28-2025
-  if (!m) {
-    // Try "Sep 28" style
-    var m2 = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i);
-    if (m2) {
-      var months = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,sept:8,oct:9,nov:10,dec:11};
-      var y = refYear || (new Date()).getFullYear();
-      var d2 = new Date(y, months[m2[1].slice(0,3).toLowerCase()], parseInt(m2[2],10));
-      return d2;
-    }
-    return null;
+  var m = s.match(/\b(\d{1,2})[\/\.-](\d{1,2})(?:[\/\.-](\d{2,4}))?\b/);
+  if (m) {
+    var mm = parseInt(m[1],10)-1, dd = parseInt(m[2],10), yy = m[3] ? parseInt(m[3],10) : (refYear || (new Date()).getFullYear());
+    if (yy < 100) yy += 2000;
+    return new Date(yy, mm, dd, 0,0,0,0);
   }
-  var mm = parseInt(m[1],10)-1, dd = parseInt(m[2],10), yy = m[3] ? parseInt(m[3],10) : (refYear || (new Date()).getFullYear());
-  if (yy < 100) yy += 2000;
-  return new Date(yy, mm, dd, 0,0,0,0);
+  var m2 = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/i);
+  if (m2) {
+    var months = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,sept:8,oct:9,nov:10,dec:11};
+    var yy2 = refYear || (new Date()).getFullYear();
+    return new Date(yy2, months[m2[1].slice(0,3).toLowerCase()], parseInt(m2[2],10));
+  }
+  return null;
 }
 
-// Normalize a date down to midnight (local time zone)
+/** Normalize a date down to midnight (local timezone). */
 function startOfDay_(d){
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-// Normalize a date up to 23:59:59.999 (local time zone).
+/** Normalize a date up to 23:59:59.999 (local timezone). */
 function endOfDay_(d){
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59,999);
 }
@@ -79,15 +78,21 @@ function fmtInTz_(date, fmt, tz) {
   return Utilities.formatDate(date, tz || getTz_(), fmt || "yyyy-MM-dd HH:mm");
 }
 
-function isoWeekKey_(d) {
-  // ISO week YYYY-Www
+
+// --- ISO Week helpers: return "YYYY-Www" ---
+function isoWeekKey_(d, tz) {
+  tz = tz || getTz_();
+  var y = Utilities.formatDate(d, tz, 'yyyy'); // we’ll recalc year below w/ ISO logic
+  // ISO week calc: from a copy in UTC to avoid DST weirdness
   var date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  // Thursday in current week decides the year
+  // Thursday in current week decides the year.
   date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
-  var yearStart = new Date(Date.UTC(date.getUTCFullYear(),0,1));
+  // First week of year
+  var yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  // ISO week number
   var weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
-  var wk = weekNo < 10 ? '0' + weekNo : String(weekNo);
-  return date.getUTCFullYear() + '-W' + wk;
+  var isoYear = date.getUTCFullYear();
+  return isoYear + '-W' + ('0'+weekNo).slice(-2);
 }
 
 // Monday-based start of current week
@@ -117,15 +122,8 @@ function getProps_(keys){
   return out;
 }
 function setProps_(obj){ if (obj && typeof obj === 'object') props_().setProperties(obj, true); }
+
 function delProps_(keys){ (keys||[]).forEach(function(k){ props_().deleteProperty(k); }); }
-
-
-// ----- SHEET HELPERS -----
-function getSS_() {
-  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  if (id) { try { return SpreadsheetApp.openById(id); } catch (e) {} }
-  return SpreadsheetApp.getActive();
-}
 
 // ----- CRYPTO/IDEMPOTENCE HELPERS -----
 function sha256Hex_(s){
@@ -138,38 +136,68 @@ function sha256Hex_(s){
 
 // ----- STRING HELPERS -----
 
-function _norm_(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim(); }
+function _norm_(s) { return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim(); }
 
 // Extract a human-readable when string (assume PM ET if time present w/o am/pm)
 function whenStringFromText_(text) {
   var s = String(text || '');
-  // date like 9/28 or 09/28/2025
-  var mDate = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
-  var dateStr = mDate ? mDate[0] : '';
 
-  // time like 9, 9:00, 930, 9.30 with optional am/pm
-  var mTime = s.match(/\b(\d{1,2})(?::?(\d{2}))?\s*(am|pm)?\b/i);
-  var timeStr = '';
-  if (mTime) {
-    var hh = parseInt(mTime[1],10);
-    var mm = mTime[2] ? mTime[2] : '00';
-    var ap = (mTime[3] || '').toLowerCase();
-    if (!ap) ap = 'pm'; // default PM if unspecified
-    timeStr = hh + ':' + mm + ' ' + ap.upper ? ap.toUpperCase() : ap.toUpperCase();
+  // Prefer explicit time with separators and optional am/pm
+  var m = s.match(/\b(\d{1,2})(?::|\.|h)?(\d{2})?\s*(am|pm)?\b/i);
+
+  var hh = null, mm = null, ap = null;
+
+  if (m) {
+    hh = parseInt(m[1], 10);
+    mm = (typeof m[2] === 'string' && m[2].length) ? m[2] : '00';
+    ap = (m[3] || '').toLowerCase();
+  } else {
+    // Fallback: compact 3–4 digit time like 930 or 1230
+    var mc = s.match(/\b(\d{3,4})\b/);
+    if (mc) {
+      var t = mc[1];
+      if (t.length === 3) {
+        hh = parseInt(t.charAt(0), 10);
+        mm = t.slice(1);
+      } else {
+        hh = parseInt(t.slice(0, 2), 10);
+        mm = t.slice(2);
+      }
+      ap = ''; // unspecified
+    }
   }
 
-  var parts = [];
-  if (dateStr) parts.push(dateStr);
-  if (timeStr) parts.push(timeStr + ' ET');
-  return parts.join(' ').trim() || '';
+  if (hh == null) return '';
+
+  // Normalize minutes to two digits
+  mm = ('0' + String(parseInt(mm, 10) || 0)).slice(-2);
+
+  // Default to PM if AM/PM not specified
+  if (!ap) ap = 'pm';
+
+  // Normalize AM/PM casing
+  ap = ap.toUpperCase(); // 'AM' or 'PM'
+
+  // Convert to 12h clock display (do not change day; just presentational)
+  var displayH = hh;
+  if (ap === 'AM') {
+    displayH = (hh % 12) === 0 ? 12 : (hh % 12);
+  } else { // PM
+    displayH = (hh % 12) === 0 ? 12 : (hh % 12);
+  }
+
+  return displayH + ':' + mm + ' ' + ap + ' ET';
 }
+
 
 // Normalize text: lowercase, remove non-alphanum to spaces, collapse spaces
 function normalizeText_(s) {
-  var t = String(s || '').toLowerCase();
-  t = t.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  var t = String(s || '');
+  try { t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (_) {}
+  t = t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
   return t;
 }
+
 
 /** Trim and collapse whitespace, preserve internal spaces. */
 function cleanName_(s){
@@ -223,10 +251,28 @@ function cachePutJson_(key, obj, ttlSec){
 
 // ----- LOGGING -----
 
-function logLocal_(level, msg, obj){
-  const ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
-  const line = `[${level}] ${ts} ${msg} ${obj ? JSON.stringify(obj) : ''}`;
-  console.log(line);
+function getOrCreateLogSheet_() {
+  var ss = ss_();
+  var name = PropertiesService.getScriptProperties().getProperty('WM_LOG_SHEET_NAME') || 'WM_Log';
+  var sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    // header
+    sh.getRange(1,1,1,4).setValues([['ts','level','event','data']]);
+  }
+  return sh;
+}
+
+function logLocal_(level, event, data) {
+  try {
+    var sh = getOrCreateLogSheet_();
+    var json = (typeof data === 'string') ? data : JSON.stringify(data || {});
+    sh.appendRow([new Date(), String(level||'INFO'), String(event||''), json]);
+    return true;
+  } catch (e) {
+    Logger.log('logLocal_ failed: ' + (e && e.message || e));
+    return false;
+  }
 }
 
 // ----- DIVISION HELPERS -----
@@ -280,40 +326,30 @@ function getGridLayout_() {
   return { mapStartRow: mapStart, blockStride: stride };
 }
 
+// Map ref: A28, A39, A50… based on block index (start=28, stride=11; configurable by SP)
 function getMapRefAt_(sheet, topRow) {
   if (!sheet || !topRow) return '';
-  var grid = getGridLayout_();
-
-  // Try to infer the block index from getAllBlocks_, else approximate by rounding
+  var blocks = [];
+  try { blocks = getAllBlocks_(sheet) || []; } catch(_){}
   var idx = -1;
-  try {
-    if (typeof getAllBlocks_ === 'function') {
-      var blocks = getAllBlocks_(sheet) || [];
-      // find exact or nearest block whose top <= topRow < nextTop
-      for (var i = 0; i < blocks.length; i++) {
-        var t = blocks[i] && (blocks[i].top || blocks[i].startRow);
-        var nxt = (blocks[i+1] && (blocks[i+1].top || blocks[i+1].startRow)) || 1e9;
-        if (t && topRow >= t && topRow < nxt) { idx = i; break; }
-      }
-    }
-  } catch (_) {}
-
-  if (idx < 0) {
-    // Approximate index from constant map rows (28, 39, 50, …)
-    idx = Math.max(0, Math.round((topRow - grid.mapStartRow) / grid.blockStride));
+  for (var i=0;i<blocks.length;i++){
+    var t = blocks[i] && (blocks[i].top || blocks[i].startRow);
+    var nxt = (blocks[i+1] && (blocks[i+1].top || blocks[i+1].startRow)) || 1e9;
+    if (t && topRow >= t && topRow < nxt) { idx = i; break; }
   }
+  if (idx < 0) idx = 0;
 
-  var mapRow = grid.mapStartRow + grid.blockStride * idx; // e.g., 28 + 11*idx
+  var sp = PropertiesService.getScriptProperties();
+  var mapStart = parseInt(sp.getProperty('GRID_MAP_START_ROW') || '28', 10);
+  var stride   = parseInt(sp.getProperty('GRID_BLOCK_STRIDE')  || '11', 10);
+  var row = mapStart + stride*idx;
+
   var val = '';
-  try { val = String(sheet.getRange('A' + mapRow).getDisplayValue() || '').trim(); } catch (_){}
-
-  // Fallback scan a few rows nearby if empty
+  try { val = String(sheet.getRange('A'+row).getDisplayValue() || '').trim(); } catch(_){}
   if (!val) {
-    for (var r = mapRow; r < mapRow + 4; r++) {
-      try {
-        var v = String(sheet.getRange('A' + r).getDisplayValue() || '').trim();
-        if (v) { val = v; break; }
-      } catch (_){}
+    // try a couple rows below just in case
+    for (var r=row+1;r<=row+3;r++){
+      try { var v2 = String(sheet.getRange('A'+r).getDisplayValue() || '').trim(); if (v2){ val=v2; break; } } catch(_){}
     }
   }
   return val;
@@ -339,14 +375,27 @@ function canonDivision_(name){
   return s;
 }
 
+// --- Build a solid week object and key no matter what you pass in ---
 function getWeekKeyFromWeek_(week) {
-  if (!week) throw new Error('getWeekKeyFromWeek_: week is required');
-  if (week.weekKey) return String(week.weekKey);
-  var d = week.date || week.start;
-  if (!(d instanceof Date)) throw new Error('getWeekKeyFromWeek_: invalid week.date/start; expected Date');
-  if (typeof weekKey_ === 'function') return weekKey_(d);
-  if (typeof isoWeekKey_ === 'function') return isoWeekKey_(d);
-  return Utilities.formatDate(d, getTz_(), "yyyy-'W'ww");
+  try {
+    if (week && typeof week.weekKey === 'string' && /\S/.test(week.weekKey)) return String(week.weekKey);
+
+    var tz = getTz_();
+    var d = (week && (week.start || week.date)) ? new Date(week.start || week.date) : new Date();
+    var key = isoWeekKey_(d, tz);
+    return key;
+  } catch (e) {
+    // absolute fallback: today yyyy-MM-dd
+    return Utilities.formatDate(new Date(), getTz_(), 'yyyy-MM-dd');
+  }
+}
+
+// --- Optional: human label like "Sep 29 – Oct 5" if you need it ---
+function getWeekLabel_(week) {
+  var tz = getTz_();
+  var start = new Date(week && (week.start || week.date) || new Date());
+  var end   = new Date(start.getTime() + 6*86400000);
+  return Utilities.formatDate(start, tz, 'MMM d') + '–' + Utilities.formatDate(end, tz, 'MMM d');
 }
 
 function getWeeklyPostChannelId_(){

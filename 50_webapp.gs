@@ -24,12 +24,23 @@ function _json_(obj) {
 
 // Header or param secret
 function _checkSecret_(secret) {
-  var expected = _getProp_('WM_WEBAPP_SHARED_SECRET', '');
-  if (!expected) throw new Error('Webapp secret is not configured');
-  var got = String(secret || '').trim();
-  if (!got) throw new Error('Missing secret');
-  if (got !== expected) throw new Error('Forbidden: bad secret');
+  var sp = PropertiesService.getScriptProperties();
+  var expected = String(sp.getProperty('WM_WEBAPP_SHARED_SECRET') || '');
+  if (!expected) throw new Error('Missing WM_WEBAPP_SHARED_SECRET');
+
+  var got = String(secret == null ? '' : secret);
+
+  // Allow header-style tokens and trim whitespace
+  if (got.indexOf('Bearer ') === 0) got = got.slice(7);
+  got = got.replace(/^\s+|\s+$/g, '');
+  expected = expected.replace(/^\s+|\s+$/g, '');
+
+  if (got !== expected) {
+    Utilities.sleep(20); // tiny delay to reduce brute force attempts
+    throw new Error('Forbidden: bad secret');
+  }
 }
+
 
 // Try to extract secret from request
 function _secretFromRequest_(e) {
@@ -91,19 +102,11 @@ function server_postOrUpdate(secret) {
   }
 }
 
-function server_deleteWeeklyCluster(secret) {
-  try {
-    _checkSecret_(secret);
-    if (typeof deleteWeeklyCluster_ !== 'function') throw new Error('deleteWeeklyCluster_ not found');
-    var res = deleteWeeklyCluster_();
-    return _ok_(res || { deleted: true });
-  } catch (e) { return _err_(e); }
-}
-
 function server_verifyConfig(secret) {
   try { _checkSecret_(secret); verifyConfig_(); return { ok:true, data:{ message:'Config OK' } }; }
   catch (e) { return { ok:false, error:String(e && e.message || e) }; }
 }
+
 /** Start polling from a specific message ID (inclusive). */
 function server_startPollingFrom(secret, startId, dryRun) {
   try {
@@ -221,8 +224,6 @@ function server_debugIndexSnapshot(secret, opts) {
   }
 }
 
-
-
 // ---------- OAuth relay callback support ----------
 // The Cloud Run relay may call the WebApp with op=saveTwitch to persist a Twitch URL for a Discord user.
 // We accept both GET and POST and require the shared secret.
@@ -231,9 +232,11 @@ function doGet(e) {
   try {
     // ---- Serve control panel UI when requested ----
     var p = (e && e.parameter) || {};
+    var t = HtmlService.createTemplateFromFile('ktp_control_panel');
+    t.WM_SECRET = PropertiesService.getScriptProperties().getProperty('WM_WEBAPP_SHARED_SECRET') || '';
     if (p.op === 'panel' || p.view === 'panel' || p.ui === '1') {
-      return HtmlService.createHtmlOutputFromFile('wm_panel')
-        .setTitle('WM Control Panel')
+      return HtmlService.createHtmlOutputFromFile('ktp_control_panel')
+        .setTitle('KTP Weekly Matches Panel')
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
     }
 
@@ -258,7 +261,6 @@ function doGet(e) {
     return _json_(_err_(e2));
   }
 }
-
 
 function doPost(e) {
   try {
@@ -298,3 +300,71 @@ function server_getTwitchUrl(secret, userId) {
     return _ok_({ userId: String(userId), twitchUrl: url });
   } catch (e) { return _err_(e); }
 }
+
+function server_parseDebug(secret, line, hintDivision) {
+  _checkSecret_(secret);
+  return _ok_( parseDebug_(line, hintDivision) );
+}
+
+/**
+ * Handle ":shoutcast: dod_map team1 vs team2"
+ * If the user has a stored Twitch URL, update the row immediately.
+ * If not, DM them to ask for it once, store placeholder; returns info.
+ */
+function server_shoutcastClaim(secret, rawText, userId, username) {
+  _checkSecret_(secret);
+  var cmd = parseShoutcastCommand_(String(rawText||''));
+  if (!cmd.ok) return _ok_({ ok:false, reason: cmd.reason || 'bad_command' });
+
+  var url = getTwitchForUser_(userId);
+  if (!url) {
+    // DM prompt to collect once
+    try {
+      if (typeof postDM_==='function') {
+        postDM_(userId, "Hey "+(username||'there')+"! Please reply with your Twitch URL so I can attach it to the weekly board (e.g., https://twitch.tv/yourname).");
+      }
+      setTwitchForUser_(userId, username||'', '');
+    } catch(_){}
+    return _ok_({ ok:false, reason:'twitch_missing_prompted', map:cmd.map, home:cmd.home, away:cmd.away });
+  }
+
+  // Update the row now
+  var wk = (typeof getAlignedUpcomingWeekOrReport_==='function') ? getAlignedUpcomingWeekOrReport_() : null;
+  var wkKey = wk && wk.weekKey || '';
+  if (!wkKey) return _ok_({ ok:false, reason:'no_wkKey' });
+
+  var res = updateRowCasterInTablesMessage_(wkKey, cmd.map, cmd.home, cmd.away, url);
+  return _ok_(res);
+}
+
+function server_applyScheduleText(secret, textOrDiscordMessage) {
+  _checkSecret_(secret);
+
+  // 1) Parse the message into pairs
+  var parsed = parseScheduleMessage_v2(textOrDiscordMessage);
+  if (!parsed || !parsed.ok || !parsed.pairs || !parsed.pairs.length) {
+    return _ok_({ ok:false, reason: (parsed && parsed.errors && parsed.errors[0] && parsed.errors[0].reason) || 'no_pairs_found', parsed: parsed });
+  }
+
+  // 2) Resolve the active week key
+  var week = (typeof getAlignedUpcomingWeekOrReport_ === 'function') ? getAlignedUpcomingWeekOrReport_() : null;
+  var wkKey = (week && week.weekKey) || '';
+
+  if (!wkKey) return _ok_({ ok:false, reason:'no_wkKey', parsed: parsed });
+
+  // 3) Apply to the existing tables message (EDIT in place; no new posts)
+  var res = updateTablesMessageFromPairs_(wkKey, parsed.pairs);
+
+  // 4) Touch the header to refresh timestamp (optional but recommended)
+  try { touchWeeklyHeaderTimestamp_(wkKey, week); } catch(_){}
+
+  return _ok_({ ok: !!(res && res.ok), parsed: parsed, update: res, wkKey: wkKey });
+}
+
+// Run one poll cycle now (useful for a panel button)
+function server_pollOnce(secret) {
+  _checkSecret_(secret);
+  var res = pollDiscordOnce_();
+  return _ok_(res);
+}
+

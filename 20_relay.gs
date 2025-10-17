@@ -357,3 +357,42 @@ function getShoutcasterInfoForMessage_(channelId, messageId){
 
   return { tag: `<@${uid}>`, id: uid };
 }
+
+// Helper to normalize relay responses into a Discord message ID
+function idFromRelay_(resp) {
+  try {
+    if (!resp) return null;
+    if (resp.id) return String(resp.id);
+    if (resp.message && resp.message.id) return String(resp.message.id);
+    if (resp.data && resp.data.id) return String(resp.data.id);
+  } catch (e) {}
+  return null;
+}
+
+function _enc_(s){ return encodeURIComponent(String(s||'')); }
+
+// tweak these paths to match your relay if they differ
+function fetchMessageById_(channelId, messageId) {
+  var path = '/message?channelId=' + _enc_(channelId) + '&messageId=' + _enc_(messageId);
+  return relayFetch_('GET', path, null);
+}
+function listReactions_(channelId, messageId, emoji) {
+  // Accept ':name:' or 'name:id' or unicode; strip surrounding colons
+  var e = String(emoji||'').trim();
+  if (e.startsWith(':') && e.endsWith(':')) e = e.slice(1,-1);
+  var path = '/reactions?channelId=' + _enc_(channelId) +
+             '&messageId=' + _enc_(messageId) +
+             '&emoji=' + _enc_(e);
+  return relayFetch_('GET', path, null);
+}
+
+// Extract plain content from relay response
+function contentFromRelay_(resp) {
+  try {
+    if (!resp) return '';
+    if (resp.content) return String(resp.content);
+    if (resp.message && resp.message.content) return String(resp.message.content);
+    if (resp.data && resp.data.content) return String(resp.data.content);
+  } catch(e){}
+  return '';
+}

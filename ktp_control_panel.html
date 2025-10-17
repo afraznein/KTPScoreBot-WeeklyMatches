@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>KTP Weekly Matches Panel</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif; }
+    body { margin: 16px; }
+    h1 { margin: 0 0 12px; font-size: 18px; }
+    .card { border: 1px solid #e2e2e2; border-radius: 10px; padding: 12px; margin: 0 0 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    label { font-size: 12px; color: #333; display: block; margin-bottom: 4px; }
+    input[type="text"], input[type="password"] { width: 300px; padding: 6px 8px; border-radius: 8px; border: 1px solid #cfcfcf; }
+    button { padding: 8px 12px; border: 1px solid #cfcfcf; background: #fafafa; border-radius: 8px; cursor: pointer; }
+    button:hover { background: #f1f1f1; }
+    .muted { color: #666; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .tiny { font-size: 11px; }
+
+    .status {
+      position: sticky; top: 0; z-index: 10;
+      padding: 6px 10px; margin-bottom: 8px;
+      font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #fffbe6; border: 1px solid #ffe58f; border-radius: 6px;
+    }
+    .status.busy::before {
+      content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px;
+      border: 2px solid #999; border-top-color: transparent; border-radius: 50%;
+      animation: spin 0.9s linear infinite; vertical-align: -2px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Floating debug dock (top-right) */
+    .debug-dock {
+      position: fixed;
+      top: 50px;          /* sits below the sticky status bar */
+      right: 16px;
+      width: 600px;
+      max-height: calc(100vh - 90px);
+      z-index: 20;
+      background: #0f172a;            /* slate-900 */
+      color: #e2e8f0;                 /* slate-200 */
+      border: 1px solid #334155;      /* slate-700 */
+      border-radius: 10px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .debug-dock header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 8px 10px;
+      background: #111827;           /* gray-900 */
+      border-bottom: 1px solid #334155;
+      font: 13px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    .debug-dock header .title { font-weight: 600; }
+    .debug-dock header .actions { display: flex; gap: 6px; }
+    .debug-dock button {
+      padding: 4px 8px;
+      border: 1px solid #475569;     /* slate-600 */
+      background: #1f2937;           /* gray-800 */
+      color: #e5e7eb;                /* gray-200 */
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .debug-dock button:hover { background: #374151; }
+    .debug-body {
+      padding: 8px 10px;
+      overflow: auto;
+      resize: both;                  /* allow user to resize */
+    }
+    .debug-body pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .debug-dock.collapsed .debug-body { display: none; }
+  </style>
+</head>
+<body>
+  <h1>KTP Weekly Matches Panel</h1>
+  <div id="status" class="status" style="display:none">Working…</div>
+
+  <!-- Debug dock -->
+  <div class="debug-dock" id="debugDock" aria-live="polite">
+    <header>
+      <span class="title">Debug Output</span>
+      <div class="actions">
+        <button id="dbgToggle" title="Collapse/Expand">Toggle</button>
+        <button id="dbgCopy"   title="Copy">Copy</button>
+        <button id="dbgClear"  title="Clear">Clear</button>
+      </div>
+    </header>
+    <div class="debug-body">
+      <pre id="debugOut"></pre>
+    </div>
+  </div>
+
+  <!-- State -->
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="secret">WebApp Secret</label>
+        <input id="secret" type="password" placeholder="enter WM_WEBAPP_SHARED_SECRET">
+        <div class="tiny">
+        <label><input id="remember" type="checkbox"> remember secret in this browser</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Start message ID controls -->
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="startId">Start Message ID (inclusive)</label>
+        <input id="startId" type="text" placeholder="e.g. 123456789012345678">
+      </div>
+      <button id="btnSet">Set Start ID</button>
+      <button id="btnClear">Clear Start ID</button>
+      <button id="btnStart">Start Polling (from ID)</button>
+      <button id="btnStartPointer">Start Polling (from Pointer)</button>
+      <button id"btnPollOnce"">Poll Now (parse & apply)</button>
+  </div>
+</div>
+    </div>
+    <div class="tiny muted">Polling (from ID) will process this message first, then newer ones.</div>
+  </div>
+
+  <!-- Actions + Team Index folded here -->
+  <div class="card">
+    <div class="row" style="align-items:flex-end;">
+      <div class="stack">
+        <div class="row">
+          <button id="btnPost">Post/Update Weekly Board</button>
+          <button id="btnState">Get State</button>
+          <button id="btnDebug">Debug Settings</button>
+          <div class="tiny" style="margin-bottom:6px;">
+          <label><input type="checkbox" id="idxReset"> Reset cache before sampling</label>
+          <button id="btnIdxShow">Show Snapshot</button>
+          <button id="btnIdxResetShow">Reset &amp; Show Snapshot</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="out" class="tiny mono muted" style="margin-top:8px;">ready.</div>
+  </div>
+
+  <div class="card" style="margin-top:10px;">
+  <div class="card-header">Shoutcast Claim (test)</div>
+  <div class="card-body">
+    <input id="sc_user" placeholder="Discord User ID" style="width:49%;">
+    <input id="sc_name" placeholder="Username" style="width:49%;">
+    <input id="sc_text" placeholder=":shoutcast: dod_anzio Team A vs Team B" style="width:100%;margin-top:6px;">
+    <button class="btn" style="margin-top:8px;" onclick="onShoutcastClaim()">Claim</button>
+    <pre id="sc_out" style="margin-top:8px;max-height:200px;overflow:auto;background:#111;color:#eee;padding:6px;border-radius:6px;"></pre>
+  </div>
+</div>
+
+  <div class="card" style="margin-top:10px;">
+  <div class="card-header" style="font-weight:600;">Parser Debug</div>
+  <div class="card-body">
+    <label for="pd_line" style="display:block;margin-bottom:4px;">Line to parse</label>
+    <textarea id="pd_line" rows="3" style="width:100%;font-family:monospace;"></textarea>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+      <label for="pd_div" style="white-space:nowrap;">Division hint:</label>
+      <select id="pd_div">
+        <option value="">(auto)</option>
+        <option>Bronze</option>
+        <option>Silver</option>
+        <option>Gold</option>
+      </select>
+      <button id="btnParseDebug" onclick="onParseDebug()" class="btn">Parse Debug</button>
+    </div>
+
+    <pre id="pd_out" style="margin-top:8px;max-height:280px;overflow:auto;background:#111;color:#e6e6e6;padding:8px;border-radius:6px;"></pre>
+  </div>
+</div>
+
+  <script>
+    // ---------- small helpers ----------
+    const $ = (id) => document.getElementById(id);
+
+    function setBusy(isBusy, message) {
+      const status = $('status');
+      if (!status) return;
+      // disable/enable all buttons
+      Array.prototype.forEach.call(document.querySelectorAll('button'), function(btn){
+        btn.disabled = !!isBusy;
+      });
+      if (isBusy) {
+        status.textContent = message || 'Working…';
+        status.classList.add('busy');
+        status.style.display = 'block';
+      } else {
+        status.textContent = '';
+        status.classList.remove('busy');
+        status.style.display = 'none';
+      }
+    }
+
+    const out = (msg, cls='') => {
+      const el = $('out');
+      el.className = 'tiny mono ' + (cls || 'muted');
+      el.textContent = String(msg);
+    };
+
+    const showState = (obj) => { $('state').textContent = JSON.stringify(obj, null, 2); };
+
+    function unwrapOk(res){
+      if (res && res.ok && res.data !== undefined) return res.data; // {_ok_ wrapper}
+      return res;
+    }
+
+    // Debug dock helpers
+    function setDebug(text) {
+      const el = $('debugOut');
+      if (el) el.textContent = (text == null ? '' : String(text));
+    }
+    function clearDebug() { setDebug(''); }
+
+    (function wireDebugDock(){
+      const dock   = $('debugDock');
+      const dbgOut = $('debugOut');
+      $('dbgToggle').onclick = function(){ dock.classList.toggle('collapsed'); };
+      $('dbgCopy').onclick   = async function(){ try { await navigator.clipboard.writeText(dbgOut.textContent || ''); } catch(e){} };
+      $('dbgClear').onclick  = function(){ clearDebug(); };
+    })();
+
+    // Persist secret (optional)
+    (function initSecret(){
+      const saved = localStorage.getItem('wm_secret');
+      if (saved) { $('secret').value = saved; $('remember').checked = true; }
+      $('remember').addEventListener('change', () => {
+        if ($('remember').checked) localStorage.setItem('wm_secret', $('secret').value || '');
+        else localStorage.removeItem('wm_secret');
+      });
+      $('secret').addEventListener('input', () => {
+        if ($('remember').checked) localStorage.setItem('wm_secret', $('secret').value || '');
+      });
+    })();
+
+    function needSecret() {
+      const s = $('secret').value.trim();
+      if (!s) { out('secret required for this action', 'err'); throw new Error('missing secret'); }
+      return s;
+    }
+
+    function printIndexToDebug(res) {
+      if (!res) { setDebug('No response'); return; }
+      if (res.ok === false && res.error) {
+        setDebug('Error: ' + (res.error.message || res.error || JSON.stringify(res.error)));
+        return;
+      }
+      const o = unwrapOk(res) || {};
+      const lines = [];
+      lines.push('cacheKey:     ' + (o.cacheKey || '(none)'));
+      lines.push('spreadsheetId:' + (o.spreadsheetId || '(unset)'));
+      lines.push('divisions:    ' + ((o.divisions || []).join(', ') || '(none)'));
+      lines.push('totalTeams:   ' + (o.totalTeams != null ? o.totalTeams : '(unknown)'));
+      lines.push('byDivision:   ' + JSON.stringify(o.byDivision || {}));
+      lines.push('samples:      ' + JSON.stringify(o.samples || {}));
+      setDebug(lines.join('\n'));
+    }
+
+    function printStateToDebug(res) {
+      if (!res) { setDebug('No response'); return; }
+      if (res.ok === false && res.error) {
+        setDebug('Error: ' + (res.error.message || res.error || JSON.stringify(res.error)));
+        return;
+      }
+      const data = (res && res.ok && res.data !== undefined) ? res.data : res; // unwrapOk inline
+      setDebug(JSON.stringify(data, null, 2));
+    }
+
+  // ---------- button wiring (all with setBusy) ----------
+  $('btnState').onclick = function() {
+      setBusy(true, 'Loading state…');
+      clearDebug(); // optional: start clean each time
+      google.script.run
+        .withSuccessHandler(function(res){
+          out(res.ok ? 'ok' : (res.error || 'error'), res.ok ? 'ok' : 'err');
+          if (res.ok) {
+            // Keep the inline state box
+            showState(res.data);
+          }
+          // Always mirror to the floating debug dock
+          printStateToDebug(res);
+          setBusy(false);
+        })
+        .withFailureHandler(function(e){
+          out('script error: ' + e.message, 'err');
+          setDebug('Failure: ' + (e && e.message || e));
+          setBusy(false);
+        })
+        .server_getState();
+    };
+
+    $('btnSet').onclick = function() {
+      try {
+        const secret = needSecret();
+        const id = $('startId').value.trim();
+        if (!/^\d{5,30}$/.test(id)) { out('invalid message id', 'err'); return; }
+        setBusy(true, 'Setting start id…');
+        google.script.run
+          .withSuccessHandler(function(res){
+            out(res.ok ? ('set: ' + JSON.stringify(res.data)) : res.error, res.ok ? 'ok' : 'err');
+            setBusy(false);
+          })
+          .withFailureHandler(function(e){
+            out('script error: ' + e.message, 'err');
+            setBusy(false);
+          })
+          .server_setStartId(secret, id);
+      } catch(e) {}
+    };
+
+    $('btnClear').onclick = function() {
+      try {
+        const secret = needSecret();
+        setBusy(true, 'Clearing start id…');
+        google.script.run
+          .withSuccessHandler(function(res){
+            out(res.ok ? 'cleared' : res.error, res.ok ? 'ok' : 'err');
+            setBusy(false);
+          })
+          .withFailureHandler(function(e){
+            out('script error: ' + e.message, 'err');
+            setBusy(false);
+          })
+          .server_clearStartId(secret);
+      } catch(e) {}
+    };
+
+    $('btnPost').onclick = function() {
+      try {
+        const secret = needSecret();
+        setBusy(true, 'Posting/updating weekly board…');
+        out(true, 'Posting/updating weekly board…');
+        clearDebug();
+        google.script.run
+          .withSuccessHandler(function(res){
+            out(res.ok ? ('done: ' + JSON.stringify(res.data)) : res.error, res.ok ? 'ok' : 'err');
+            setBusy(false);
+          })
+          .withFailureHandler(function(e){
+            out('script error: ' + e.message, 'err');
+            setBusy(false);
+          })
+          .server_postOrUpdate(secret);
+      } catch(e) {}
+    };
+
+    $('btnDebug').onclick = function() {
+      try {
+        const secret = needSecret();
+        setBusy(true, 'Verifying config…');
+        out(true, 'Verifying config…');
+        clearDebug();
+        google.script.run
+          .withSuccessHandler(function(res){
+            out(res.ok ? 'config ok' : res.error, res.ok ? 'ok' : 'err');
+            setDebug(JSON.stringify(unwrapOk(res), null, 2));
+            setBusy(false);
+          })
+          .withFailureHandler(function(e){
+            out('script error: ' + e.message, 'err');
+            setBusy(false);
+          })
+          .server_verifyConfig(secret);
+      } catch(e) {}
+    };
+
+    $('btnStart').onclick = function() {
+      try {
+        const secret = needSecret();
+        const id = $('startId').value.trim();
+        if (!/^\d{5,30}$/.test(id)) { out('invalid message id', 'err'); return; }
+        const dryRunOverride = null; // or 'true' / 'false'
+        setBusy(true, 'Starting poll from ID…');
+        clearDebug();
+        google.script.run
+          .withSuccessHandler(function(res){
+            if (res.ok) {
+              out('poll finished: lastPointer=' + res.data.lastPointer + ' (' + res.data.tookMs + ' ms)', 'ok');
+              setDebug(JSON.stringify(unwrapOk(res), null, 2));
+            } else {
+              out(res.error || 'error', 'err');
+            }
+            setBusy(false);
+          })
+          .withFailureHandler(function(e){
+            out('script error: ' + e.message, 'err');
+            setBusy(false);
+          })
+          .server_startPollingFrom(secret, id, dryRunOverride);
+      } catch(e) {}
+    };
+
+      $('btnStartPointer').onclick = function() {
+      try {
+        const secret = needSecret();
+        setBusy(true, 'Starting poll from last ID…');
+        out(true, 'Starting poll from last ID…');
+        clearDebug();
+        google.script.run
+          .withSuccessHandler(function(res){
+            if (res.ok) {
+              out('poll finished: lastPointer=' + res.data.lastPointer + ' (' + res.data.tookMs + ' ms)', 'ok');
+              setDebug(JSON.stringify(unwrapOk(res), null, 2));
+            } else {
+              out(res.error || 'error', 'err');
+            }
+            setBusy(false);
+          })
+          .withFailureHandler(function(e){
+            out('script error: ' + e.message, 'err');
+            setBusy(false);
+          })
+          .server_startPollingFrom(secret);
+      } catch(e) {}
+    };
+
+    // Team Index: Show Snapshot (folded into card; writes to debug dock)
+    $('btnIdxShow').onclick = function () {
+      try {
+        const secret = needSecret();
+        const reset = !!$('idxReset').checked;
+        setBusy(true, 'Fetching team index snapshot' + (reset ? ' (after reset)…' : '…'));
+        clearDebug();
+        google.script.run
+          .withSuccessHandler(function(res){ printIndexToDebug(res); setBusy(false); })
+          .withFailureHandler(function (e) { setDebug('Failure: ' + (e && e.message || e)); setBusy(false); })
+          .server_debugIndexSnapshot(secret, { reset: reset });
+      } catch(e) {}
+    };
+
+        $('btnPollOnce').onclick = function () {
+      try {
+      function onPollOnce(){
+        const secret = needSecret();
+        setBusy(true, 'Polling...' + (reset ? ' (after polling)…' : '…'));
+        out.textContent = 'Polling...';
+        google.script.run
+          .withSuccessHandler(function(res){ out.textContent = JSON.stringify(res, null, 2); })
+          .withFailureHandler(function(err){ out.textContent = 'ERR: ' + (err && err.message ? err.message : String(err)); })
+          .server_pollOnce(secret { reset: reset });
+      }
+      } catch(e) {}
+    };
+
+  function setBusySafe(on, msg) {
+    if (typeof setBusy === 'function') return setBusy(on, msg);
+    document.body.style.cursor = on ? 'progress' : 'default';
+  }
+
+  function onParseDebug() {
+    var secret = $('secret').value;
+    var line   = document.getElementById('pd_line').value || '';
+    var div    = document.getElementById('pd_div').value || '';
+    var out    = document.getElementById('pd_out');
+
+    if (!line.trim()) {
+      out.textContent = 'Please enter a line to parse.';
+      return;
+    }
+
+    setBusySafe(true, 'Parsing…');
+    out.textContent = 'Parsing…';
+
+    google.script.run
+      .withSuccessHandler(function(res){
+        setBusySafe(false);
+        try {
+          out.textContent = JSON.stringify(res, null, 2);
+        } catch(_) {
+          out.textContent = String(res);
+        }
+      })
+      .withFailureHandler(function(err){
+        setBusySafe(false);
+        out.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+      })
+      .server_parseDebug(secret, line, div || null);
+  }
+
+  function onShoutcastClaim(){
+  var secret = (window.WM_SECRET)||'';
+  var uid = document.getElementById('sc_user').value||'';
+  var uname = document.getElementById('sc_name').value||'';
+  var text = document.getElementById('sc_text').value||'';
+  var out = document.getElementById('sc_out');
+  out.textContent = '…';
+  google.script.run
+    .withSuccessHandler(function(res){ out.textContent = JSON.stringify(res, null, 2); })
+    .withFailureHandler(function(err){ out.textContent = 'ERR: '+(err && err.message ? err.message : String(err)); })
+    .server_shoutcastClaim(secret, text, uid, uname);
+}
+  </script>
+</body>
+</html>
