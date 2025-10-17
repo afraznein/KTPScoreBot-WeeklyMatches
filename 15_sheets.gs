@@ -1,16 +1,77 @@
 // =======================
-// sheets.gs
-// Functions for reading and indexing the Google Sheet
+// sheets.gs – Functions for reading and parsing the Google Sheets data
 // =======================
 
-/** Build the canonical team map (uppercase → canonical). */
+// Where things live:
+function _gridMeta_() {
+  return {
+    firstLabelRow: 27,   // A27, A38, A49, ...
+    firstMapRow:   28,   // A28, A39, A50, ...
+    firstDateRow:  29,   // A29, A40, A51, ...
+    stride:        11,
+    matchesPerBlock: 10  // rows 28..37
+  };
+}
+
+function _parseSheetDateET_(s) {
+  s = String(s || '').trim();
+  if (!s) return null;
+  var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?$/);
+  if (!m) { var d0 = new Date(s); return isNaN(d0.getTime()) ? null : d0; }
+  var mm=+m[1], dd=+m[2], yy=m[3]?+m[3]:null; if (yy && yy<100) yy += 2000;
+  var y = yy || (new Date()).getFullYear();
+  var iso = Utilities.formatString('%04d-%02d-%02d', y, mm, dd);
+  var d = new Date(iso + 'T00:00:00-04:00'); return isNaN(d.getTime()) ? null : d;
+}
+
+function _formatWeekRangeET_(d) {
+  var tz='America/New_York', t=new Date(d.getTime());
+  var dow = (+Utilities.formatDate(t, tz, 'u')); // 1..7 (Mon..Sun)
+  var start = new Date(t.getTime()); start.setDate(start.getDate() - (dow - 1));
+  var end = new Date(start.getTime()); end.setDate(start.getDate() + 6);
+  var left = Utilities.formatDate(start, tz, 'MMM d'), right = Utilities.formatDate(end, tz, 'MMM d');
+  var lm = Utilities.formatDate(start, tz, 'MMM'), rm = Utilities.formatDate(end, tz, 'MMM');
+  return (lm===rm) ? (left+'–'+Utilities.formatDate(end,tz,'MMM d')) : (left+'–'+right);
+}
+
+function _findActiveIndexByDate_(sheet) {
+  var G=_gridMeta_(), tz='America/New_York';
+  var todayEt = new Date(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd') + 'T00:00:00-04:00');
+  var i=0, lastGood=-1;
+  while (i<200) {
+    var dateRow = G.firstDateRow + i*G.stride;
+    if (dateRow > sheet.getMaxRows()) break;
+    var s = sheet.getRange(dateRow,1).getDisplayValue().trim();
+    if (!s) { i++; continue; }
+    var d = _parseSheetDateET_(s);
+    if (d) { lastGood=i; if (d.getTime() >= todayEt.getTime()) return i; }
+    i++;
+  }
+  return (lastGood>=0 ? lastGood : 0);
+}
+
+// Top is the header row (A27, A38, A49, ...)
+function _blockTopForIndex_(idx) {
+  var G = _gridMeta_();
+  return G.firstLabelRow + (idx|0) * G.stride;  // 27 + k*11
+}
+
+function weekKey_(week) {
+  var tz='America/New_York';
+  var d = (week && week.date instanceof Date) ? week.date : (week && week.date ? new Date(week.date) : null);
+  var iso = d && !isNaN(d.getTime()) ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '';
+  var map = String(week && week.mapRef || '').trim();
+  return iso + '|' + map;
+}
+
+/** Build the canonical team map (team name uppercase → canonical name). */
 function getCanonicalTeamMap_() {
   const cached = cacheGetJson_('WM_TEAM_CANON');
   if (cached) return cached;
-
   const map = {};
   for (const div of DIVISIONS) {
-    const sh = getSheetByName_(div); if (!sh) continue;
+    const sh = getSheetByName_(div);
+    if (!sh) continue;
     const vals = sh.getRange(TEAM_CANON_RANGE).getValues().flat();
     for (const v of vals) {
       const name = String(v || '').trim();
@@ -22,466 +83,391 @@ function getCanonicalTeamMap_() {
   return map;
 }
 
-/**
- * Return the Sheet object for a division by name.
- *
- * @param {string} division One of "Bronze", "Silver", "Gold"
- * @return {GoogleAppsScript.Spreadsheet.Sheet|null}
- */
-function getDivSheet_(division) {
-  if (!division) return null;
-  const ss = ss_(); // SPREADSHEET_ID is in config.gs
-  const sh = ss.getSheetByName(division);
-  return sh || null;
-}
-
-
-/**
- * Return canonical team names for a division (Bronze/Silver/Gold)
- * from range A3:A22. Always uppercase + trimmed.
- *
- * @param {string} division
- * @return {string[]} canonical names
- */
-function getCanonicalTeams_(division) {
-  const sh = getDivSheet_(division);
-  if (!sh) return [];
-  const vals = sh.getRange('A3:A22').getValues();
-  return vals
-    .map(r => String(r[0] || '').trim().toUpperCase())
-    .filter(x => !!x);
-}
-
-
-/** Get all weekly blocks for a division sheet. */
-function getAllBlocks_(sh){
+/** Get all weekly blocks for a division sheet (array of block meta objects). */
+function getAllBlocks_(sh) {
   const blocks = [];
   let row = GRID.startRow;
-  while (true){
-    const mapCell = sh.getRange(row, COL_MAP).getValue();
-    const dateCell = sh.getRange(row+1, COL_MAP).getValue();
+  while (true) {
+    const mapCell  = sh.getRange(row, COL_MAP).getValue();
+    const dateCell = sh.getRange(row + 1, COL_MAP).getValue();
     if (!mapCell || !dateCell) break;
-
-    const map = String(mapCell).trim();
+    const map      = String(mapCell).trim();
     const weekDate = new Date(dateCell);
-    const headerWeekName = sh.getRange(row-1, COL_MAP).getValue();
-
+    const headerWeekName = sh.getRange(row - 1, COL_MAP).getValue();
     blocks.push({
       top: row,
-      map,
+      map: map,
       mapLower: normalizeMap_(map),
-      weekDate,
+      weekDate: weekDate,
       weekName: headerWeekName
     });
-
     row += GRID.blockHeight;
   }
   return blocks;
 }
 
-// Prefer the first block whose date >= today (upcoming). If none, last block.
+/**
+ * Locate the block "top" row for a division in the grid.
+ * Priority:
+ *   1) Honor week.blocks[division].top (if provided)
+ *   2) Best scan match on this division sheet:
+ *      - map + date match (score 3)
+ *      - map-only match   (score 2)
+ *      - date-only match  (score 1)
+ *   3) Fallback to _findActiveIndexByDate_(sheet)
+ *
+ * Returns: integer top row (>=1) or 0 if not found.
+ */
+// Honor the hint first; otherwise find by map/date; otherwise fall back to active index.
 function resolveDivisionBlockTop_(division, week) {
+  // 0) honor hint
+  try {
+    var hinted = week && week.blocks && week.blocks[division] && week.blocks[division].top;
+    if (hinted && hinted > 0) return hinted|0;
+  } catch (_) {}
+
+  // 1) scan this division for best match (map+date → map-only → date-only)
   var sh = getSheetByName_(division);
-  if (!sh) throw new Error('resolveDivisionBlockTop_: no sheet for '+division);
+  if (!sh) return 0;
+  var G = _gridMeta_();
+  function norm(s){ return String(s||'').trim().toLowerCase(); }
+  function toIso(d){ return Utilities.formatDate(d, 'America/New_York', 'yyyy-MM-dd'); }
+  function parseDate(s){ return _parseSheetDateET_ ? _parseSheetDateET_(s) : new Date(s); }
 
-  // 0) Honor explicit hint
-  if (week && week.blocks && week.blocks[division] && week.blocks[division].top) {
-    return week.blocks[division].top;
+  var tgtMap = norm(week && week.mapRef);
+  var tgtDate = (week && week.date) ? (week.date instanceof Date ? week.date : new Date(week.date)) : null;
+  var tgtIso = (tgtDate && !isNaN(tgtDate.getTime())) ? toIso(tgtDate) : '';
+
+  var bestIdx = -1, bestScore = -1, bestTie = 9e15;
+  for (var i=0; i<200; i++) {
+    var mapRow  = G.firstMapRow  + i*G.stride;
+    var dateRow = G.firstDateRow + i*G.stride;
+    if (mapRow > sh.getMaxRows()) break;
+
+    var map  = norm(sh.getRange(mapRow, 1).getDisplayValue());
+    var dTxt = sh.getRange(dateRow,1).getDisplayValue();
+    var d    = parseDate(dTxt);
+    var iso  = (d && !isNaN(d.getTime())) ? toIso(d) : '';
+
+    if (!map && !iso) continue;
+
+    var score = 0;
+    if (tgtMap && map && map === tgtMap) score += 2;
+    if (tgtIso && iso && iso === tgtIso) score += 1;
+
+    if (score > 0) {
+      var tie = 9e15;
+      if (tgtDate && d && !isNaN(d.getTime())) tie = Math.abs(d.getTime() - tgtDate.getTime());
+      if (score > bestScore || (score === bestScore && tie < bestTie)) {
+        bestScore = score; bestTie = tie; bestIdx = i;
+        if (score === 3) break; // perfect
+      }
+    }
   }
+  if (bestIdx >= 0) return _blockTopForIndex_(bestIdx);
 
-  var blocks = [];
-  try { blocks = getAllBlocks_(sh) || []; } catch(_){}
-  if (!blocks.length) return 3; // safe fallback
-
-  // Today's date in league tz
-  var now = new Date();
-  var tz  = getTz_();
-  var todayY = parseInt(Utilities.formatDate(now, tz, 'yyyy'),10);
-
-  // Evaluate each block date
-  var annotated = blocks.map(function(b){
-    var top = b && (b.top || b.startRow);
-    return { top: top, dt: top ? extractBlockDate_(sh, top, todayY) : null, raw:b };
-  }).filter(function(x){ return x.top; });
-
-  annotated.sort(function(a,b){
-    var ad = a.dt ? a.dt.getTime() : -1;
-    var bd = b.dt ? b.dt.getTime() : -1;
-    return ad - bd;
-  });
-
-  // First dt >= today
-  var todayMid = new Date(Utilities.formatDate(now, tz, 'yyyy-MM-dd') + 'T00:00:00' + Utilities.formatDate(now, tz, 'XXX'));
-  var upcoming = annotated.filter(function(x){ return x.dt && x.dt.getTime() >= todayMid.getTime(); });
-  if (upcoming.length) return upcoming[0].top;
-
-  // Else last block (we're past all of them)
-  return annotated[annotated.length-1].top;
+  // 2) fallback to active-by-date
+  if (typeof _findActiveIndexByDate_ === 'function') {
+    var idx = _findActiveIndexByDate_(sh);
+    return _blockTopForIndex_(idx);
+  }
+  return 0;
 }
 
-// ---------- block index + A-column helpers ----------
+/** Determine the block index (0-based) for the block starting at `topRow` in `sheet`. */
 function blockIndexForTop_(sheet, topRow) {
-  var blocks = [];
-  try { blocks = getAllBlocks_(sheet) || []; } catch(_){}
+  const blocks = getAllBlocks_(sheet) || [];
   if (!blocks.length) return 0;
-  var idx = 0;
-  for (var i = 0; i < blocks.length; i++) {
-    var t = blocks[i] && (blocks[i].top || blocks[i].startRow);
-    var nxt = (blocks[i+1] && (blocks[i+1].top || blocks[i+1].startRow)) || 1e9;
-    if (t && topRow >= t && topRow < nxt) { idx = i; break; }
-    if (t && topRow >= t) idx = i;
+  let idx = 0;
+  for (let i = 0; i < blocks.length; i++) {
+    const t = blocks[i].top;
+    const nextTop = (blocks[i + 1] && blocks[i + 1].top) || Infinity;
+    if (topRow >= t && topRow < nextTop) {
+      idx = i;
+      break;
+    }
+    if (topRow >= t) idx = i;
   }
   return idx;
 }
 
+/** Safe read of column A at a given row (returns trimmed display value or ''). */
 function _readA_(sheet, row) {
-  try { return String(sheet.getRange('A' + row).getDisplayValue() || '').trim(); } catch (_){ return ''; }
+  try {
+    return String(sheet.getRange('A' + row).getDisplayValue() || '').trim();
+  } catch (e) {
+    return '';
+  }
 }
 
-/**
- * From the block (via topRow), read MAP and DATE from the A-column meta rows.
- * Defaults: MAP at A28 + 11*i, DATE at A29 + 11*i
- * (can override with GRID_MAP_START_ROW / GRID_DATE_START_ROW / GRID_BLOCK_STRIDE)
- */
+/** Extract the map and date for the block at `topRow` of `sheet`. */
 function getWeekMetaAt_(sheet, topRow) {
-  if (!sheet || !topRow) return { idx:0, dateISO:'', rawDate:'', map:'', date:null, seasonWeek:'' };
-
-  var sp      = PropertiesService.getScriptProperties();
-  var stride  = parseInt(sp.getProperty('GRID_BLOCK_STRIDE')    || '11', 10);
-  var map0    = parseInt(sp.getProperty('GRID_MAP_START_ROW')    || '28', 10);
-  var date0   = parseInt(sp.getProperty('GRID_DATE_START_ROW')   || '29', 10);
-  var label0  = parseInt(sp.getProperty('GRID_LABEL_START_ROW')  || '27', 10); // NEW
-
-  var idx     = blockIndexForTop_(sheet, topRow);
-  var mapRow  = map0   + stride * idx;
-  var dateRow = date0  + stride * idx;
-  var lblRow  = label0 + stride * idx;
-
-  var mapTxt  = _readA_(sheet, mapRow)  || _readA_(sheet, mapRow + 1)  || _readA_(sheet, mapRow - 1);
-  var dateTxt = _readA_(sheet, dateRow) || _readA_(sheet, dateRow + 1) || _readA_(sheet, dateRow - 1);
-  var lblTxt  = _readA_(sheet, lblRow)  || _readA_(sheet, lblRow + 1)  || _readA_(sheet, lblRow - 1);
-
-  var tz   = getTz_();
-  var yr   = parseInt(Utilities.formatDate(new Date(), tz, 'yyyy'), 10);
-  var dObj = parseDateFromText_(dateTxt, yr);
-  var iso  = dObj ? Utilities.formatDate(dObj, tz, 'yyyy-MM-dd') : '';
-
+  if (!sheet || !topRow) {
+    return { idx: 0, dateISO: '', rawDate: '', map: '', date: null, seasonWeek: '' };
+  }
+  const idx    = blockIndexForTop_(sheet, topRow);
+  const mapRow = GRID.startRow + GRID.blockHeight * idx;
+  const dateRow = mapRow + 1;
+  const labelRow = mapRow - 1;
+  const mapTxt  = _readA_(sheet, mapRow) || _readA_(sheet, mapRow + 1) || _readA_(sheet, mapRow - 1);
+  const dateTxt = _readA_(sheet, dateRow) || _readA_(sheet, dateRow + 1) || _readA_(sheet, dateRow - 1);
+  const lblTxt  = _readA_(sheet, labelRow) || _readA_(sheet, labelRow + 1) || _readA_(sheet, labelRow - 1);
+  const tz    = getTz_();
+  const refYr = Number(Utilities.formatDate(new Date(), tz, 'yyyy'));
+  const dObj  = parseDateFromText_(dateTxt, refYr);
+  const iso   = dObj ? Utilities.formatDate(dObj, tz, 'yyyy-MM-dd') : '';
   return {
     idx: idx,
     dateISO: iso,
     rawDate: dateTxt,
     map: (mapTxt || '').trim(),
     date: dObj,
-    seasonWeek: (lblTxt || '').trim()   // NEW
+    seasonWeek: (lblTxt || '').trim()
   };
 }
 
+function getAlignedUpcomingWeekOrReport_() {
+  var G=_gridMeta_(); var gold = getSheetByName_('Gold');
+  if (!gold) throw new Error('Sheet "Bronze" not found');
+  var idx = _findActiveIndexByDate_(gold);
 
-/** Choose the week's MAP+DATE by looking at the chosen block per division.
- * Returns { dateISO, map, from: { division, top } }.
+  var mapRef = gold.getRange(G.firstMapRow   + idx*G.stride, 1).getDisplayValue().trim();
+  var dateTx = gold.getRange(G.firstDateRow  + idx*G.stride, 1).getDisplayValue().trim();
+  var label  = gold.getRange(G.firstLabelRow + idx*G.stride, 1).getDisplayValue().trim();
+  var date   = _parseSheetDateET_(dateTx);
+  if (!date) throw new Error('Could not parse default date at A' + (G.firstDateRow + idx*G.stride) + ' on Gold');
+
+  var divs = (typeof getDivisionSheets_==='function') ? getDivisionSheets_() : ['Bronze','Silver','Gold'];
+  var blocks = {}; for (var i=0;i<divs.length;i++) blocks[divs[i]] = { top: _blockTopForIndex_(idx) };
+
+  var week = {
+    date: date,
+    mapRef: mapRef || '',
+    seasonWeekTitle: label || '',
+    range: _formatWeekRangeET_(date),
+    blocks: blocks
+  };
+  week.weekKey = weekKey_(week);
+  return week;
+}
+
+// Pull meta for a division from its block header row (top = header row: A27/A38/A49…)
+function deriveWeekMetaFromDivisionTop_(division, top) {
+  var sh = (typeof getSheetByName_ === 'function') ? getSheetByName_(division) : null;
+  if (!sh || !top) return null;
+  var tz = 'America/New_York';
+
+  var label  = String(sh.getRange(top + 0, 1).getDisplayValue() || '').trim(); // A(top)
+  var mapRef = String(sh.getRange(top + 1, 1).getDisplayValue() || '').trim(); // A(top+1)
+  var dateTx = String(sh.getRange(top + 2, 1).getDisplayValue() || '').trim(); // A(top+2)
+
+  var date = (typeof _parseSheetDateET_ === 'function') ? _parseSheetDateET_(dateTx) : new Date(dateTx);
+  if (date && isNaN(date.getTime())) date = null;
+
+  var range = date ? _formatWeekRangeET_(date) : '';
+  var epochSec = null;
+  if (date) {
+    var dEt = Utilities.formatDate(date, tz, 'yyyy-MM-dd');
+    // default kickoff 9:00 PM ET
+    var dt = new Date(dEt + 'T21:00:00-04:00');
+    epochSec = Math.floor(dt.getTime() / 1000);
+  }
+  return { label: label, mapRef: mapRef, date: date, range: range, epochSec: epochSec };
+}
+
+/**
+ * Make the header meta (label/map/date/range/epoch) come from the SAME
+ * block as your current tables. Uses Bronze as canonical, unless you pass another division.
+ * Also re-populates week.blocks so all divisions share this top.
  */
-function chooseWeekMetaAcrossDivisions_(week) {
-  var divs = getDivisionSheets_();
-  var votes = {}; // key: dateISO|map -> count
-  var labelCount = {}; // seasonWeek -> count
-  var firstGood = null;
+function syncHeaderMetaToTables_(week, canonicalDivision) {
+  week = week || {};
+  var divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze','Silver','Gold'];
+  var canon = canonicalDivision || divs[0] || 'Bronze';
 
-  for (var i = 0; i < divs.length; i++) {
-    var div = divs[i];
-    var sh  = getSheetByName_(div);
-    if (!sh) continue;
-    var top = resolveDivisionBlockTop_(div, week);
-    if (!top) continue;
+  var top = (typeof resolveDivisionBlockTop_ === 'function') ? resolveDivisionBlockTop_(canon, week) : 0;
+  if (!top) return week; // nothing to do
 
-    var meta = getWeekMetaAt_(sh, top);
-    if (!meta.dateISO || !meta.map) continue;
+  var meta = deriveWeekMetaFromDivisionTop_(canon, top);
+  if (!meta) return week;
 
-    var key = meta.dateISO + '|' + meta.map;
-    votes[key] = (votes[key] || 0) + 1;
+  week.seasonWeekTitle = meta.label || week.seasonWeekTitle || '';
+  week.mapRef          = meta.mapRef || week.mapRef || '';
+  week.date            = meta.date   || week.date || null;
+  week.range           = meta.range  || week.range || '';
+  if (typeof meta.epochSec === 'number') week.epochSec = meta.epochSec;
 
-    var lbl = meta.seasonWeek || '';
-    if (lbl) labelCount[lbl] = (labelCount[lbl] || 0) + 1;
+  // unify all division tops to this block
+  if (!week.blocks) week.blocks = {};
+  for (var i = 0; i < divs.length; i++) week.blocks[divs[i]] = { top: top };
 
-    if (!firstGood) {
-      firstGood = {
-        key: key, dateISO: meta.dateISO, map: meta.map,
-        seasonWeek: lbl, from: { division: div, top: top }
-      };
-    }
-  }
-
-
-  var bestKey = null, bestN = 0;
-  for (var k in votes) if (votes[k] > bestN) { bestKey = k; bestN = votes[k]; }
-
-  var bestLabel = '';
-  var bestLabelN = 0;
-  for (var L in labelCount) if (labelCount[L] > bestLabelN) { bestLabel = L; bestLabelN = labelCount[L]; }
-
-  if (bestKey) {
-    var parts = bestKey.split('|');
-    return { dateISO: parts[0] || '', map: parts[1] || '', seasonWeek: bestLabel || (firstGood && firstGood.seasonWeek) || '', from: firstGood && firstGood.from };
-  }
-  return firstGood || { dateISO:'', map:'', seasonWeek:'', from:null };
+  // refresh weekKey now that meta is in sync
+  if (typeof weekKey_ === 'function') week.weekKey = weekKey_(week);
+  return week;
 }
+/**
+ * Returns current-week matches for a division.
+ * top = header row (A27/A38/…); grid is rows (top+1 .. top+10), cols B..H.
+ * Uses C/G for names; skips BYE/blank rows.
+ */
+function getMatchesForDivisionWeek_(division, top) {
+  var sh = (typeof getDivisionSheet_ === 'function') ? getDivisionSheet_(division)
+         : (typeof getSheetByName_  === 'function') ? getSheetByName_(division)
+         : null;
+  if (!sh || !top) return [];
 
-function getSeasonWeekLabelFromGrid_(week) {
-  var m = chooseWeekMetaAcrossDivisions_(week);
-  return m.seasonWeek || '';
-}
+  var firstGridRow = top + 1;         // <-- IMPORTANT: start one row below header
+  var rows = 10;                      // matches per block
+  var band = sh.getRange(firstGridRow, 2, rows, 7).getDisplayValues(); // B..H
 
-/** Final wkKey for posts: "YYYY-MM-DD|map" from the grid */
-function getWeekKeyFromGrid_(week) {
-  var m = chooseWeekMetaAcrossDivisions_(week);
-  return (m.dateISO || '') + '|' + (m.map || '');
-}
+  function isBye(s){ return /^\s*BYE\s*$/i.test(String(s||'')); }
 
-// Readable block name helper
-function _blockName_(sheet, block, top) {
-  var nm = block && (block.name || block.weekName) ? String(block.name || block.weekName) : '';
-  if (!nm && typeof getWeekNameAt_ === 'function' && top) {
-    try { nm = String(getWeekNameAt_(sheet, top) || ''); } catch (_){}
-  }
-  return nm;
-}
-
-// Extract a representative date for a block (from name, else from a few cells)
-function extractBlockDate_(sheet, blockTop, refYear) {
-  try {
-    var nm = _blockName_(sheet, null, blockTop);
-    var dt = parseDateFromText_(nm, refYear);
-    if (dt) return dt;
-  } catch(_){}
-  // scan a small window in the block for any date token
-  try {
-    var end = Math.min(sheet.getLastRow(), blockTop + 10);
-    var vals = sheet.getRange(blockTop, 1, Math.max(1, end-blockTop+1), Math.min(6, sheet.getLastColumn())).getDisplayValues();
-    var best = null;
-    for (var r=0;r<vals.length;r++){
-      for (var c=0;c<vals[r].length;c++){
-        var d = parseDateFromText_(vals[r][c], refYear);
-        if (d) { best = best || d; }
-      }
-    }
-    return best;
-  } catch(_){}
-  return null;
-}
-
-/** Return the aligned (upcoming) week or null. */
-function getAlignedUpcomingWeekOrReport_(refDate) {
-  var tz = getTz_();
-  var now = refDate ? new Date(refDate) : new Date();
-
-  var start = new Date(now);
-  start.setHours(0,0,0,0);
-  var dow = start.getDay(); // Sun=0..Sat=6; align to Monday
-  var mondayDiff = (dow + 6) % 7;
-  start.setDate(start.getDate() - mondayDiff);
-  if (dow === 6 || dow === 0) start.setDate(start.getDate() + 7); // Sat/Sun → next week
-
-  var end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  end.setHours(23,59,59,999);
-
-  var wkKey = (typeof weekKey_ === 'function') ? weekKey_(start)
-            : (typeof isoWeekKey_ === 'function') ? isoWeekKey_(start)
-            : Utilities.formatDate(start, tz, "yyyy-'W'ww");
-
-  return {
-    date: start,
-    start: start,
-    end: end,
-    tz: tz,
-    weekKey: wkKey,
-    label: Utilities.formatDate(start, tz, "MMM d") + "–" +
-           Utilities.formatDate(end,   tz, "MMM d")
-  };
-}
-
-
-/** Build fast index for a given week. */
-function buildWeekMatchIndex_(week){
-  const idx = {};
-  for (const div of DIVISIONS){
-    const sh = getSheetByName_(div); if (!sh) continue;
-    var top = resolveDivisionBlockTop_((divisionName), week);
-    const vals = sh.getRange(top,1,GRID.matchesPerBlock,GRID.cols).getValues();
-    const map = {};
-    for (let i=0;i<vals.length;i++){
-      const r = vals[i];
-      const home = String(r[COL_T1_NAME-1]||'').trim().toUpperCase();
-      const away = String(r[COL_T2_NAME-1]||'').trim().toUpperCase();
-      if (!home || !away) continue;
-      const key = [home, away].sort().join('|');
-      map[key] = { rowIndex: i, top };
-    }
-    idx[div] = map;
-  }
-  return idx;
-}
-
-function getWeekMatchIndex_(week){
-  const wk = weekKey_(week);
-  const k = `WM_IDX_${wk}`;
-  const cached = cacheGetJson_(k);
-  if (cached) return cached;
-  const built = buildWeekMatchIndex_(week);
-  cachePutJson_(k, built, LOOKUP_CACHE_TTL_SEC);
-  return built;
-}
-
-/** Find week name from row offset. */
-function getWeekNameAt_(sh, top){
-  return sh.getRange(top-1, COL_MAP).getValue();
-}
-
-/** Return true if row already has results. */
-function hasResult_(row){
-  return (row[COL_T1_RESULT-1] || row[COL_T2_RESULT-1] || row[COL_T1_SCORE-1] || row[COL_T2_SCORE-1]);
-}
-
-function readTeamsFromRange_(sheet, divName, rangeA1) {
-  var values = sheet.getRange(rangeA1).getDisplayValues();
   var out = [];
-  var seen = {};
-  for (var r = 0; r < values.length; r++) {
-    var name = String(values[r][0] || '').trim();
-    if (!name) continue;
-    // Skip obvious non-team lines you might store in col A
-    if (/^#/ .test(name)) continue;          // e.g., #notes
-    if (/^week\b/i.test(name)) continue;     // e.g., Week of ...
-    if (/^notes?\b/i.test(name)) continue;   // e.g., Notes
-    if (seen[name]) continue;
-    seen[name] = 1;
-    out.push({ division: divName, name: name, aliases: [], abbrev: '', emojiId: '', emojiName: '' });
+  for (var i = 0; i < band.length; i++) {
+    var r = band[i];                  // [B,  C,   D,  E,  F,   G,   H]
+    var home = String(r[1] || '').trim(); // C
+    var away = String(r[5] || '').trim(); // G
+    if (!home && !away) continue;
+    if (isBye(home) || isBye(away)) continue;
+
+    out.push({
+      home: home,
+      away: away,
+      // handy to keep around (not shown in table yet)
+      homeScore: (r[2] === '' || r[2] == null) ? null : r[2], // D
+      awayScore: (r[6] === '' || r[6] == null) ? null : r[6]  // H
+    });
   }
   return out;
 }
 
-// Convert column letter to 1-based index (A=1, B=2, ...)
-function colIdx_(letter) {
-  letter = String(letter || '').toUpperCase();
-  var n = 0;
-  for (var i = 0; i < letter.length; i++) n = n * 26 + (letter.charCodeAt(i) - 64);
-  return n || 1;
-}
-
-// Read grid columns from Script Properties, with safe defaults:
-// B/F = W/L, C/G = teams, D/H = scores
-function getGridCols_() {
-  var sp = PropertiesService.getScriptProperties();
-  function getOrDef(key, def) { return (sp.getProperty(key) || def); }
-  var WL1 = colIdx_(getOrDef('GRID_COL_WL1', 'B'));
-  var T1  = colIdx_(getOrDef('GRID_COL_TEAM1', 'C'));
-  var S1  = colIdx_(getOrDef('GRID_COL_SCORE1', 'D'));
-  var WL2 = colIdx_(getOrDef('GRID_COL_WL2', 'F'));
-  var T2  = colIdx_(getOrDef('GRID_COL_TEAM2', 'G'));
-  var S2  = colIdx_(getOrDef('GRID_COL_SCORE2', 'H'));
-  return { WL1:WL1, T1:T1, S1:S1, WL2:WL2, T2:T2, S2:S2 };
-}
-
-function _isBlank_(v) { return !String(v || '').trim(); }
-function _hasNumber_(v) { return /\d/.test(String(v || '')); }
-
-// Simple shim so board/scheduler can call this name
-function getDivisionSheet_(division){
-  return getSheetByName_(division);
-}
-
 /**
- * Prefer a pending match in the aligned week block; else scan previous blocks (history).
- * Returns:
- *   { located: { division, absRow, t1, t2, weekObject }, from: 'aligned'|'history' }
- * or null if none.
+ * Collect make-up (unplayed) matches across all divisions.
+ *
+ * Layout (per block):
+ *   A27  = week label
+ *   A28  = map
+ *   A29  = default date
+ *   B28:H37 (10 rows) = weekly grid
+ *     B = W/L (home)   C = Team Home    D = Score Home
+ *     F = W/L (away)   G = Team Away    H = Score Away
+ *
+ * A match is "played" if EITHER:
+ *   - Both scores (D & H) are numeric, OR
+ *   - Both W/L cells (B & F) contain a token like W/L/T/FF/FORFEIT.
+ * Everything else is considered an unplayed make-up.
+ *
+ * Only blocks whose default date is in the PAST (ET) are scanned into results.
+ * BYE rows are ignored.
+ *
+ * @param {Object=} week optional; not required (date/map not used here)
+ * @return {Array<Object>} [{ division, mapRef, home, away, date, dateIso, weekLabel }]
  */
-function locatePendingMatchAlignedThenHistory_(division, alignedWeek, teamA, teamB) {
-  var sh = getDivisionSheet_(division);
-  if (!sh) return null;
+function getMakeupMatchesAllDivs_(week) {
+  var tz = 'America/New_York';
 
-  function isPendingRow_(r){
-    var t1r = String(r[COL_T1_RESULT-1]||'').trim();
-    var t2r = String(r[COL_T2_RESULT-1]||'').trim();
-    var s1  = String(r[COL_T1_SCORE -1]||'').trim();
-    var s2  = String(r[COL_T2_SCORE -1]||'').trim();
-    return !t1r && !t2r && !s1 && !s2;
+  // Grid constants for your sheet
+  var G = (typeof _gridMeta_ === 'function') ? _gridMeta_() : {
+    firstLabelRow: 27,   // A27, A38, A49, ...
+    firstMapRow:   28,   // A28, A39, A50, ...
+    firstDateRow:  29,   // A29, A40, A51, ...
+    stride:        11,
+    matchesPerBlock: 10
+  };
+
+  // Midnight "today" in ET — blocks < today are eligible as make-ups
+  var todayEt = new Date(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd') + 'T00:00:00-04:00');
+
+  var divisions = (typeof getDivisionSheets_ === 'function')
+    ? getDivisionSheets_()
+    : ['Bronze', 'Silver', 'Gold'];
+
+  var out = [];
+
+  function isBye(s) {
+    return /^\s*BYE\s*$/i.test(String(s || ''));
+  }
+  function isNumCell(s) {
+    return /^\s*\d+\s*$/.test(String(s || ''));
+  }
+  function isWLT(s) {
+    var t = String(s || '').trim().toUpperCase();
+    return /^(W|L|T|FF|F|FORFEIT)$/.test(t);
+  }
+  function parseEtDate(s) {
+    if (typeof _parseSheetDateET_ === 'function') return _parseSheetDateET_(s);
+    var d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  function blockHeaderTop(i) {
+    // Header row for block index i → A27 + i*11
+    return G.firstLabelRow + (i | 0) * G.stride;
   }
 
-  function rowMatches_(r){
-    var a = String(r[COL_T1_NAME-1]||'').trim().toUpperCase();
-    var b = String(r[COL_T2_NAME-1]||'').trim().toUpperCase();
-    if (!a || !b) return false;
-    var A = String(teamA||'').toUpperCase();
-    var B = String(teamB||'').toUpperCase();
-    if (a === 'BYE' || b === 'BYE') return false;
-    return (a===A && b===B) || (a===B && b===A);
-  }
+  for (var d = 0; d < divisions.length; d++) {
+    var division = divisions[d];
+    var sh = (typeof getSheetByName_ === 'function') ? getSheetByName_(division) : null;
+    if (!sh) continue;
 
-  // 1) Try aligned week block first
-  try {
-    var top = resolveDivisionBlockTop_(division, alignedWeek);
-    if (top) {
-      var vals = sh.getRange(top, 1, GRID.matchesPerBlock, GRID.cols).getValues();
-      for (var i=0;i<vals.length;i++){
-        if (rowMatches_(vals[i]) && isPendingRow_(vals[i])) {
-          return {
-            located: { division: division, absRow: top + i, t1: teamA, t2: teamB, weekObject: alignedWeek },
-            from: 'aligned'
-          };
+    var maxRows = sh.getMaxRows();
+
+    // Scan all potential blocks in this division
+    for (var bi = 0; bi < 200; bi++) {
+      var labelRow = G.firstLabelRow + bi * G.stride;
+      var mapRow   = G.firstMapRow   + bi * G.stride;
+      var dateRow  = G.firstDateRow  + bi * G.stride;
+      if (dateRow > maxRows) break;
+
+      var label  = String(sh.getRange(labelRow, 1).getDisplayValue() || '').trim();
+      var mapRef = String(sh.getRange(mapRow,  1).getDisplayValue() || '').trim();
+      var dateTx = String(sh.getRange(dateRow, 1).getDisplayValue() || '').trim();
+
+      // Skip completely empty headers
+      if (!label && !mapRef && !dateTx) continue;
+
+      var dft = parseEtDate(dateTx);
+      if (!dft) continue;
+
+      // Only include blocks strictly before today (ET)
+      if (!(dft.getTime() < todayEt.getTime())) continue;
+
+      // Pull the weekly grid band: rows (headerTop+1) .. (headerTop+10), columns B..H (7 cols)
+      var top = blockHeaderTop(bi);                 // A27/A38/...
+      var firstGridRow = top + 1;                   // grid starts one row below header
+      var band = sh.getRange(firstGridRow, 2, G.matchesPerBlock, 7).getDisplayValues(); // B..H
+
+      for (var r = 0; r < band.length; r++) {
+        var row = band[r];
+        // [B,  C,   D,  E,  F,   G,   H]
+        // [wl1,home,sc1, -, wl2, away, sc2]
+        var wl1  = row[0];
+        var home = String(row[1] || '').trim();
+        var sc1  = row[2];
+        var wl2  = row[4];
+        var away = String(row[5] || '').trim();
+        var sc2  = row[6];
+
+        if (!home && !away) continue;
+        if (isBye(home) || isBye(away)) continue;
+
+        var finishedByScore = isNumCell(sc1) && isNumCell(sc2);
+        var finishedByWLT   = isWLT(wl1) && isWLT(wl2);
+        var played = finishedByScore || finishedByWLT;
+
+        if (!played) {
+          out.push({
+            division: division,
+            mapRef: mapRef || '',
+            home: home,
+            away: away,
+            date: dft,
+            dateIso: Utilities.formatDate(dft, tz, 'yyyy-MM-dd'),
+            weekLabel: label || ''
+          });
         }
       }
     }
-  } catch(_){}
-
-  // 2) Scan all blocks (history)
-  try {
-    var blocks = getAllBlocks_(sh) || [];
-    for (var b=0;b<blocks.length;b++){
-      var top2 = blocks[b].top;
-      var vals2 = sh.getRange(top2, 1, GRID.matchesPerBlock, GRID.cols).getValues();
-      for (var j=0;j<vals2.length;j++){
-        if (rowMatches_(vals2[j]) && isPendingRow_(vals2[j])) {
-          return {
-            located: { division: division, absRow: top2 + j, t1: teamA, t2: teamB, weekObject: { date: blocks[b].weekDate, map: blocks[b].map } },
-            from: 'history'
-          };
-        }
-      }
-    }
-  } catch(_){}
-
-  return null;
-}
-
-function getOrCreateProfilesSheet_() {
-  var ss = ss_();
-  var sh = ss.getSheetByName('Profiles');
-  if (!sh) {
-    sh = ss.insertSheet('Profiles');
-    sh.getRange(1,1,1,4).setValues([['userId','username','twitchUrl','lastPromptAt']]);
   }
-  return sh;
-}
-function getTwitchForUser_(userId) {
-  if (!userId) return '';
-  var sh = getOrCreateProfilesSheet_();
-  var vals = sh.getDataRange().getValues();
-  for (var i=1;i<vals.length;i++) {
-    if (String(vals[i][0]) === String(userId)) return String(vals[i][2]||'');
-  }
-  return '';
-}
-function setTwitchForUser_(userId, username, twitchUrl) {
-  if (!userId) return;
-  var sh = getOrCreateProfilesSheet_();
-  var vals = sh.getDataRange().getValues();
-  for (var i=1;i<vals.length;i++) {
-    if (String(vals[i][0]) === String(userId)) {
-      sh.getRange(i+1,2,1,2).setValues([[username||vals[i][1], twitchUrl||vals[i][2]]]);
-      return;
-    }
-  }
-  sh.appendRow([String(userId), String(username||''), String(twitchUrl||''), new Date()]);
-}
 
-
+  return out;
+}
