@@ -51,7 +51,10 @@ function _ensureStoreShape_(store) {
  */
 function _findMatchRowIndex_(division, top, home, away) {
   var sh = (typeof getSheetByName_ === 'function') ? getSheetByName_(division) : null;
-  if (!sh) return -1;
+  if (!sh) {
+    if (typeof sendLog_ === 'function') sendLog_(`🔍 _findMatchRowIndex_: sheet not found for ${division}`);
+    return -1;
+  }
 
   var gridStartRow = top + 1;
   var rows = 10; // grid size
@@ -62,11 +65,27 @@ function _findMatchRowIndex_(division, top, home, away) {
   };
   var nh = norm(home), na = norm(away);
 
+  // Diagnostic logging
+  if (typeof sendLog_ === 'function') {
+    sendLog_(`🔍 Finding match: "${home}" vs "${away}" → normalized: "${nh}" vs "${na}"`);
+    sendLog_(`🔍 Searching ${division} rows ${gridStartRow}-${gridStartRow + rows - 1} (block top: ${top})`);
+  }
+
+  // Exact match first
   for (var i = 0; i < band.length; i++) {
     var r = band[i]; // [B,C,D,E,F,G,H]
-    var ch = norm(r[1]); // C
-    var ca = norm(r[5]); // G
-    if (ch && ca && ch === nh && ca === na) return i;
+    var ch = norm(r[1]); // C (home)
+    var ca = norm(r[5]); // G (away)
+
+    if (i < 3 && typeof sendLog_ === 'function') {
+      // Log first 3 rows for debugging
+      sendLog_(`🔍 Row ${i}: sheet="${r[1]}" vs "${r[5]}" → normalized: "${ch}" vs "${ca}"`);
+    }
+
+    if (ch && ca && ch === nh && ca === na) {
+      if (typeof sendLog_ === 'function') sendLog_(`✅ Exact match found at row ${i}`);
+      return i;
+    }
   }
 
   // Soft match: allow partial on either side if unique
@@ -79,7 +98,17 @@ function _findMatchRowIndex_(division, top, home, away) {
       (ca2 && (ca2.indexOf(na) >= 0 || na.indexOf(ca2) >= 0));
     if (hit) candidates.push(j);
   }
-  return (candidates.length === 1) ? candidates[0] : -1;
+
+  if (candidates.length === 1) {
+    if (typeof sendLog_ === 'function') sendLog_(`✅ Fuzzy match found at row ${candidates[0]}`);
+    return candidates[0];
+  }
+
+  if (typeof sendLog_ === 'function') {
+    sendLog_(`❌ No match found. Candidates: ${candidates.length}`);
+  }
+
+  return -1;
 }
 
 /**

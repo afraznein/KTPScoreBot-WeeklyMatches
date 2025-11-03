@@ -567,23 +567,34 @@ function _processOneDiscordMessage_(msg) {
     const isTentative = parsed.status === 'Confirming' || parsed.tentative;
     const isRematch = parsed.isRematch || false;
 
-
     // Log this parsed result
     logMatchToWMLog_(parsed, msg.author?.id || msg.authorId, msg.channel?.name || msg.channelName || msg.channel, isTentative, isRematch);
 
-
-    // Write match time to sheet in Column E
+    // Update tables: find row, update store, refresh Discord board
+    let updateResult = null;
     try {
-      const sheet = SpreadsheetApp.getActive().getSheetByName(parsed.division);
-      if (sheet && parsed.row && parsed.whenText) {
-        sheet.getRange(parsed.row, 5).setValue(parsed.whenText); // Column E = 5
+      if (typeof updateTablesMessageFromPairs_ === 'function' && parsed.pairs && parsed.weekKey) {
+        updateResult = updateTablesMessageFromPairs_(parsed.weekKey, parsed.pairs);
+
+        if (updateResult.updated > 0) {
+          sendLog_(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>`);
+        }
+
+        if (updateResult.unmatched && updateResult.unmatched.length > 0) {
+          const reasons = updateResult.unmatched.map(u => u.reason).join(', ');
+          sendLog_(`⚠️ ${parsed.division} • ? • Unmapped — ${parsed.team1} vs ${parsed.team2} (${reasons})`);
+        }
       }
     } catch (e) {
-      sendLog_(`⚠️ Error writing to sheet: ${e.message}`);
+      sendLog_(`⚠️ Error updating tables: ${e.message}`);
     }
 
-    const line = formatScheduleConfirmationLine_(parsed, parsed.row, msg.author?.id, msg.id);
-    relayPost_('/reply', { channelId: String(RESULTS_LOG_CHANNEL_ID), content: line });
+    // Send confirmation to log channel
+    const rowInfo = (updateResult && updateResult.updated > 0) ? 'Mapped' : 'Unmapped';
+    const line = formatScheduleConfirmationLine_(parsed, null, msg.author?.id, msg.id);
+    if (typeof postChannelMessage_ === 'function') {
+      postChannelMessage_(RESULTS_LOG_CHANNEL_ID, line);
+    }
 
   }
   catch (e) {

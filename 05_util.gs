@@ -109,7 +109,7 @@ function discordEpochAt9pmFromISO(dateISO, tz) {
 
 // ----- STRING & TEXT HELPERS -----
 /** Normalize generic token text (lowercase, strip non-alphanumeric). */
-function formatWeeklyNotice(week, actionWord) {
+function formatWeeklyNotice_(week, actionWord) {
   var tz = (week && week.tz) || (typeof getTimezone_ === 'function' ? getTimezone_() : 'America/New_York');
   var season = (week && week.seasonWeek) || '';
   var mapRef = (week && week.mapRef) || '';
@@ -292,8 +292,8 @@ let __TEAM_ALIAS_CACHE = null;
 
 function loadTeamAliases_() {
   if (__TEAM_ALIAS_CACHE) return __TEAM_ALIAS_CACHE;
-
-  const sh = SpreadsheetApp.getActive().getSheetByName('_Aliases');
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sh = ss.getSheetByName('_Aliases');
   if (!sh) return (__TEAM_ALIAS_CACHE = {});
 
   const data = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues(); // alias | canonical
@@ -436,12 +436,12 @@ function getDivisionSheets_() {
 
 /** Return the Google Sheet object for a name. */
 function getSheetByName(sheetName) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   return ss.getSheetByName(String(sheetName)) || null;
 }
 
 function getSeasonInfo_() {
-  var ss = SpreadsheetApp.getActive();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sh = ss.getSheetByName(SEASON_INFO);
   if (!sh) return '';
   var v = sh.getRange('A1').getDisplayValue();

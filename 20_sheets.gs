@@ -7,6 +7,7 @@
 //
 // Functions in this module:
 // - _gridMeta_()
+// - getSheetByName_(sheetName)
 // - getGeneralSheet_()
 // - getAllMapsList_()
 // - _parseSheetDateET_(s)
@@ -24,7 +25,7 @@
 // - getMatchesForDivisionWeek_(division, top)
 // - getMakeupMatchesAllDivs_(week)
 //
-// Total: 17 functions
+// Total: 18 functions
 // =======================
 
 // Where things live:
@@ -38,11 +39,18 @@ function _gridMeta_() {
   };
 }
 
+/** Returns a sheet by name from the configured spreadsheet. */
+function getSheetByName_(sheetName) {
+  if (!SPREADSHEET_ID) {
+    throw new Error('SPREADSHEET_ID not configured in Script Properties');
+  }
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  return ss.getSheetByName(sheetName);
+}
+
 /** Returns the "General" sheet (change name here if yours differs). */
 function getGeneralSheet_() {
-  if (typeof getSheetByName === 'function') return getSheetByName('General');
-  var ss = SpreadsheetApp.getActive();
-  return ss.getSheetByName('General');
+  return getSheetByName_('General');
 }
 
 /** Load all canonical maps from General!J2:J (non-blank). */
@@ -155,7 +163,7 @@ function resolveDivisionBlockTop_(division, week) {
   } catch (_) { }
 
   // 1) scan this division for best match (map+date → map-only → date-only)
-  var sh = getSheetByName(division);
+  var sh = getSheetByName_(division);
   if (!sh) return 0;
   var G = _gridMeta_();
   function norm(s) { return String(s || '').trim().toLowerCase(); }

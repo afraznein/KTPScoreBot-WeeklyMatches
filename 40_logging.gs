@@ -26,7 +26,7 @@ function sendLog_(msg) {
     logLocal_('WARN', 'sendLog_ failed', { error: String(e) });
   }
   try {
-    const ss = SpreadsheetApp.getActive();
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sh = ss.getSheetByName(LOG_SHEET);
     if (!sh) {
       sh = ss.insertSheet('WM_LOG');
@@ -61,7 +61,8 @@ function logParsingSummary_(successCount, tentativeCount, sourceChannel) {
 }
 
 function logMatchToWMLog_(entry, authorId, sourceChannel, isTentative, isRematch) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName('WM_Log');
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName('WM_Log');
   if (!sheet) return;
 
   const map = entry.map || '';
@@ -79,7 +80,7 @@ function logMatchToWMLog_(entry, authorId, sourceChannel, isTentative, isRematch
 
 function logToWmSheet_(level, event, message, detailsObj) {
   try {
-    var ss = SpreadsheetApp.getActive();
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sh = ss.getSheetByName(LOG_SHEET) || ss.insertSheet(LOG_SHEET);
     if (sh.getLastRow() === 0) {
       sh.appendRow(['Timestamp', 'Level', 'Event', 'Message', 'Details (JSON)']);
