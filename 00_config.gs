@@ -2,6 +2,28 @@
 // config.gs (canonical constants)
 // =======================
 
+/**
+ * KTPScoreBot-WeeklyMatches Configuration
+ *
+ * Version: 3.0.0
+ * Last Updated: 2025-11-02
+ *
+ * CHANGELOG:
+ * v3.0.0 (2025-11-02) - Major refactoring: Split 10main.gs into 8 focused modules
+ *                     - Fixed 17 missing function definitions (underscore naming)
+ *                     - Removed 7 dead code functions
+ *                     - Added version tracking with Discord/web app display
+ * v2.1.0 (2024-12-XX) - Added team alias support via _Aliases sheet
+ *                     - Improved schedule parser with fuzzy team matching
+ *                     - Enhanced date/time parsing flexibility
+ * v2.0.0 (2024-10-XX) - Initial weekly matches automation system
+ *                     - Discord relay integration
+ *                     - Automatic weekly board posting
+ */
+
+const VERSION = '3.0.0';
+const VERSION_DATE = '2025-11-02';
+
 // ---- DISCORD RELAY ----
 const RELAY_BASE = 'RELAY_BASE';
 const RELAY_AUTH = 'RELAY_AUTH';

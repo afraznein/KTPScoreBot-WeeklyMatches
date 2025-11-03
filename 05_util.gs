@@ -2,13 +2,43 @@
 // util.gs – General helper functions (dates, strings, caching, logging, etc.)
 // =======================
 
-function ktpEmoji_() { return '<:ktp:' + KTP_EMOJI_ID + '>'; }
+/**
+ * Get version information for display
+ * @returns {Object} {version, date, formatted}
+ */
+function getVersionInfo_() {
+  const v = (typeof VERSION !== 'undefined') ? VERSION : '0.0.0';
+  const d = (typeof VERSION_DATE !== 'undefined') ? VERSION_DATE : 'unknown';
+  return {
+    version: v,
+    date: d,
+    formatted: `v${v} (${d})`
+  };
+}
 
-function _normalizeWhitespace_(s) {
+/**
+ * Log version info to Discord on startup/config changes
+ * Call this from any initialization function or manually from menu
+ */
+function logVersionToDiscord_() {
+  const info = getVersionInfo_();
+  const msg = `🤖 **KTPScoreBot-WeeklyMatches** ${info.formatted} ready`;
+
+  // Use sendLog_ if available, otherwise post directly
+  if (typeof sendLog_ === 'function') {
+    sendLog_(msg);
+  } else if (typeof postChannelMessage_ === 'function' && typeof RESULTS_LOG_CHANNEL_ID !== 'undefined') {
+    postChannelMessage_(RESULTS_LOG_CHANNEL_ID, msg);
+  }
+}
+
+function ktpEmoji() { return '<:ktp:' + KTP_EMOJI_ID + '>'; }
+
+function normalizeWhitespace_(s) {
   return String(s || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
 }
 
-function _isJustPings_(s) {
+function isJustPings_(s) {
   // Heuristic: if after removing mentions/emojis we have almost nothing, treat as pings
   var t = String(s || '')
     .replace(/<[@#][!&]?\d+>/g, ' ')
@@ -19,7 +49,7 @@ function _isJustPings_(s) {
   return t.length < 3;
 }
 
-function _decStringMinusOne_(s) {
+function decStringMinusOne_(s) {
   s = String(s || '').trim();
   if (!/^\d+$/.test(s)) return null;
   if (s === '0') return '0';
@@ -60,14 +90,16 @@ function parseDateFromText_(text, refYear) {
 }
 
 /** Project timezone (or override TZ from script properties). */
-function getTz_() {
+function getTimezone_() {
   const sp = PropertiesService.getScriptProperties();
   return sp.getProperty('TZ') || Session.getScriptTimeZone() || 'America/New_York';
 }
+/** Alias for compatibility */
+function getTz_() { return getTimezone_(); }
 
-function discordEpochAt9pmFromISO_(dateISO, tz) {
+function discordEpochAt9pmFromISO(dateISO, tz) {
   if (!dateISO) return null;
-  tz = tz || (typeof getTz_ === 'function' ? getTz_() : 'America/New_York');
+  tz = tz || (typeof getTimezone_ === 'function' ? getTimezone_() : 'America/New_York');
   // Apps Script `Date` uses project timezone; set that to your league TZ in Project Settings for perfect alignment.
   var p = String(dateISO).split('-');
   var y = +p[0], m = +p[1] - 1, d = +p[2];
@@ -77,8 +109,8 @@ function discordEpochAt9pmFromISO_(dateISO, tz) {
 
 // ----- STRING & TEXT HELPERS -----
 /** Normalize generic token text (lowercase, strip non-alphanumeric). */
-function formatWeeklyNotice_(week, actionWord) {
-  var tz = (week && week.tz) || (typeof getTz_ === 'function' ? getTz_() : 'America/New_York');
+function formatWeeklyNotice(week, actionWord) {
+  var tz = (week && week.tz) || (typeof getTimezone_ === 'function' ? getTimezone_() : 'America/New_York');
   var season = (week && week.seasonWeek) || '';
   var mapRef = (week && week.mapRef) || '';
   var seasonInfo = (typeof getSeasonInfo_ === 'function' ? getSeasonInfo_() : '');
@@ -88,11 +120,11 @@ function formatWeeklyNotice_(week, actionWord) {
   return ':white_check_mark: ' +
     [seasonInfo, season, mapRef].filter(Boolean).join(' ') +
     ' Weekly Boards ' + (actionWord || 'Posted/Edited') + '. ' +
-    ts + ' ' + ktpEmoji_();
+    ts + ' ' + ktpEmoji();
 }
 
 /** Normalize map key to lowercase (dod_*). */
-function normalizeMap_(s) {
+function normalizeMap(s) {
   return String(s || '').trim().toLowerCase();
 }
 
@@ -115,44 +147,47 @@ function maxSnowflake(a, b) {
 // ---------- Table formatting helpers (single source of truth) ----------
 
 // Repeat a string n times (used for separators)
-function _repeat_(ch, n) {
+function repeat_(ch, n) {
   ch = String(ch || '');
   n = Math.max(0, n | 0);
   return (typeof ch.repeat === 'function') ? ch.repeat(n) : new Array(n + 1).join(ch);
 }
 
-function _padR_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return s + (k ? Array(k + 1).join(' ') : ''); }
-function _padL_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return (k ? Array(k + 1).join(' ') : '') + s; }
-function _truncate_(s, n) { s = String(s || ''); return (s.length > n) ? (s.slice(0, n - 1) + '…') : s; }
-function _padC_(s, n) {
-  s = String(s || ''); var k = Math.max(0, n - s.length), L = Math.floor(k / 2), R = k - L;
-  return (L ? Array(L + 1).join(' ') : '') + s + (R ? Array(R + 1).join(' ') : '');
+function padRight_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return s + (k ? Array(k + 1).join(' ') : ''); }
+function padLeft_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return (k ? Array(k + 1).join(' ') : '') + s; }
+// Aliases for call sites
+function padR_(s, n) { return padRight_(s, n); }
+function padL_(s, n) { return padLeft_(s, n); }
+
+function truncate(s, n) { s = String(s || ''); return (s.length > n) ? (s.slice(0, n - 1) + '…') : s; }
+function padCenter_(s, n) {s = String(s || ''); var k = Math.max(0, n - s.length), L = Math.floor(k / 2), R = k - L;  return (L ? Array(L + 1).join(' ') : '') + s + (R ? Array(R + 1).join(' ') : '');
 }
+function padC_(s, n) { return padCenter_(s, n); } // Alias for call sites
 
 // Column widths used by all tables.
 // COL1 = "Home vs Away" column width, COL2 = "Scheduled", COL3 = "Shoutcaster"
-function _getTableWidths_() {
+function getTableWidths_() {
   return { COL1: 43, COL2: 22, COL3: 12 };
 }
 
-function _formatVsCell_(home, away, col1) {
+function formatVsCell_(home, away, col1) {
   var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
-  home = _truncate_(String(home || ''), L); away = _truncate_(String(away || ''), R);
-  return _padL_(home, L) + token + _padR_(away, R);
+  home = truncate(String(home || ''), L); away = truncate(String(away || ''), R);
+  return padLeft_(home, L) + token + padRight_(away, R);
 }
 
-function _formatVsHeader_(col1) { return _formatVsCell_('Home', 'Away', col1); }
+function formatVsHeader_(col1) { return formatVsCell_('Home', 'Away', col1); }
 
 // Format a single "Home vs Away" cell to match header alignment
-function _formatVsRow_(home, away, col1) {
+function formatVsRow_(home, away, col1) {
   var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
-  home = _truncate_(String(home || ''), L); away = _truncate_(String(away || ''), R);
-  return _padL_(home, L) + token + _padR_(away, R);
+  home = truncate(String(home || ''), L); away = truncate(String(away || ''), R);
+  return padLeft_(home, L) + token + padRight_(away, R);
 }
 
-function __isBye(s) { return /^\s*BYE\s*$/i.test(String(s || '')); }
+function isBye(s) { return /^\s*BYE\s*$/i.test(String(s || '')); }
 
-function idFromRelay_(resp) {
+function idFromRelay(resp) {
   try {
     if (!resp && resp !== 0) return null;
     if (typeof resp === 'string') return resp;
@@ -163,13 +198,13 @@ function idFromRelay_(resp) {
   return null;
 }
 
-function _ensureFence_(s) {
+function ensureFence_(s) {
   s = String(s || '').trim();
   if (!s) return '';
   return s.startsWith('```') ? s : ('```text\n' + s + '\n```');
 }
 
-function _stripFence_(s) {
+function stripFence_(s) {
   s = String(s || '');
   var m = s.match(/^```[\s\S]*?\n([\s\S]*?)\n```$/);
   return m ? m[1] : s;
@@ -274,6 +309,51 @@ function loadTeamAliases_() {
   return aliasMap;
 }
 
+/**
+ * Build and cache team index for fuzzy team matching.
+ * Returns { teams: [ { name, division, aliases: [] }, ... ] }
+ * Uses TEAM_CANON_RANGE (A3:A22) from each division sheet + _Aliases sheet.
+ */
+var __TEAM_INDEX_CACHE = null;
+function getTeamIndexCached_() {
+  if (__TEAM_INDEX_CACHE) return __TEAM_INDEX_CACHE;
+
+  const teams = [];
+  const aliasMap = loadTeamAliases_(); // aliasUpper -> canonicalUpper
+
+  // Invert alias map: canonicalUpper -> [aliasUpper1, aliasUpper2, ...]
+  const canonToAliases = {};
+  for (const [alias, canon] of Object.entries(aliasMap)) {
+    if (!canonToAliases[canon]) canonToAliases[canon] = [];
+    canonToAliases[canon].push(alias);
+  }
+
+  // Read team names from each division
+  const divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze', 'Silver', 'Gold'];
+  for (const div of divs) {
+    const sh = (typeof getSheetByName === 'function') ? getSheetByName(div) : null;
+    if (!sh) continue;
+
+    const vals = sh.getRange(TEAM_CANON_RANGE).getValues().flat();
+    for (const v of vals) {
+      const name = String(v || '').trim();
+      if (!name) continue;
+
+      const nameUpper = name.toUpperCase();
+      const aliases = canonToAliases[nameUpper] || [];
+
+      teams.push({
+        name: name,
+        division: div,
+        aliases: aliases
+      });
+    }
+  }
+
+  __TEAM_INDEX_CACHE = { teams };
+  return __TEAM_INDEX_CACHE;
+}
+
 
 /**
  * Convert a big tables body (multiple code-fenced sections) into
@@ -355,13 +435,13 @@ function getDivisionSheets_() {
 }
 
 /** Return the Google Sheet object for a name. */
-function getSheetByName_(sheetName) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+function getSheetByName(sheetName) {
+  const ss = SpreadsheetApp.getActive();
   return ss.getSheetByName(String(sheetName)) || null;
 }
 
 function getSeasonInfo_() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.getActive();
   var sh = ss.getSheetByName(SEASON_INFO);
   if (!sh) return '';
   var v = sh.getRange('A1').getDisplayValue();

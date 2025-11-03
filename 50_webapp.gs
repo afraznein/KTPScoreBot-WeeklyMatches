@@ -190,6 +190,11 @@ function server_resetWeeklyMsgIds(secret) {
   }
 }
 
+/** Alias for HTML control panel compatibility */
+function server_resetMsgIdsForCurrent(secret) {
+  return server_resetWeeklyMsgIds(secret);
+}
+
 function server_deleteWeeklyCluster(secret) {
   try {
     _checkSecret_(secret);
@@ -313,6 +318,11 @@ function doGet(e) {
       return HtmlService.createHtmlOutputFromFile('ktp_control_panel')
         .setTitle('KTP Weekly Matches Control Panel')
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
+    // Version info endpoint
+    if (p.op === 'version' || p.op === 'v') {
+      const info = (typeof getVersionInfo_ === 'function') ? getVersionInfo_() : { version: '0.0.0', date: 'unknown', formatted: 'v0.0.0 (unknown)' };
+      return _json_(_ok_(info));
     }
     // Basic ping test
     if (!p || !p.op || p.op === 'ping') {
