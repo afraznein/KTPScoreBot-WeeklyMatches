@@ -1,36 +1,91 @@
 // =======================
-// webapp.gs – Web UI server functions for control panel
+// 50_webapp.gs - Web App & API Endpoints
+// =======================
+// Purpose: HTTP endpoints for control panel, polling control, Discord relay testing
+// Dependencies: 00_config.gs, 05_util.gs, 20_sheets.gs, 30_relay.gs, 55_rendering.gs, 60_parser.gs
+// Used by: External web UI, Discord bot control panel
+//
+// Functions in this module:
+// Helpers: props, getProp, ok, error, json
+// Pointers: pointerKey, getPointer, setPointer
+// Security: getAllowedSecrets, checkSecret, sanitizeSecretInput, secretFromRequest
+// Endpoints: server_getState, server_setStartId, server_clearStartId, server_verifySecrets
+//           server_resetWeeklyMsgIds, server_resetMsgIdsForCurrent, server_deleteWeeklyCluster
+//           server_postOrUpdate, server_startPollingFrom, server_startPolling
+//           server_probeRelay, server_probeRelayRoutes, server_backprocessMatch
+// HTTP: doGet, doPost
+//
+// Total: 28 functions
 // =======================
 
-/** Small internal helpers for webapp. */
+/**
+ * Get script properties service instance.
+ * @returns {PropertiesService.Properties} Script properties
+ */
 function props() { return PropertiesService.getScriptProperties(); }
 
+/**
+ * Get a script property value with optional default.
+ * @param {string} key - Property key
+ * @param {string} [def=''] - Default value if not found
+ * @returns {string} Property value or default
+ */
 function getProp(key, def) {
   const v = props().getProperty(key);
   return v != null ? v : (def || '');
 }
 
+/**
+ * Create a success response wrapper.
+ * @param {*} data - Data to return
+ * @returns {Object} {ok: true, data}
+ */
 function ok(data) {
   return { ok: true, data: data != null ? data : null };
 }
 
+/**
+ * Create an error response wrapper.
+ * @param {Error|string} err - Error object or message
+ * @returns {Object} {ok: false, error: string}
+ */
 function error(err) {
   return { ok: false, error: err && err.message ? String(err.message) : String(err) };
 }
 
+/**
+ * Convert object to JSON ContentService response.
+ * @param {Object} obj - Object to serialize
+ * @returns {ContentService.TextOutput} JSON response
+ */
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/** Where we store the “last processed message id” pointer */
+/**
+ * Get the script property key for the Discord message pointer.
+ * @returns {string} Pointer key name
+ */
 function pointerKey() { return 'DISCORD_LAST_POINTER'; }
 
+/**
+ * Get the last processed Discord message ID.
+ * @returns {string} Message ID snowflake or empty string
+ */
 function getPointer() {return PropertiesService.getScriptProperties().getProperty(pointerKey()) || ''; }
 
+/**
+ * Store the last processed Discord message ID.
+ * @param {string} id - Message ID snowflake to store
+ */
 function setPointer(id) { if (id) PropertiesService.getScriptProperties().setProperty(pointerKey(), String(id)); }
 
-/** Gather all acceptable secrets from Script Properties + config globals. */
+/**
+ * Gather all acceptable authentication secrets from Script Properties and config globals.
+ * Checks multiple property names for backwards compatibility.
+ * @returns {string[]} Array of valid secret strings (de-duplicated)
+ */
 function getAllowedSecrets() {
   var sp = PropertiesService.getScriptProperties();
   var names = [
@@ -69,7 +124,11 @@ function getAllowedSecrets() {
   return Object.keys(uniq);
 }
 
-/** Centralized secret check. Throws on mismatch. */
+/**
+ * Validate authentication secret. Throws error if invalid.
+ * @param {string} secret - Secret to validate
+ * @throws {Error} If secret doesn't match any allowed secrets
+ */
 function checkSecret(secret) {
   var s = sanitizeSecretInput(secret);
   var allowed = getAllowedSecrets();
@@ -85,15 +144,25 @@ function checkSecret(secret) {
   throw new Error('Forbidden: bad secret');
 }
 
-/** Normalize secret text to avoid invisible/odd chars mismatching. */
+/**
+ * Normalize secret text to avoid invisible/odd character mismatches.
+ * Removes zero-width chars, normalizes whitespace and quotes.
+ * @param {string} x - Raw secret input
+ * @returns {string} Sanitized secret string
+ */
 function sanitizeSecretInput(x) {
   var s = String(x || '');
   s = s.replace(/[\u200B-\u200D\uFEFF]/g, '');        // zero-widths/BOM
-  s = s.replace(/\s+/g, ' ').replace(/[“”]/g, '"').replace(/[‘’]/g, "'"); // normalize quotes/space
+  s = s.replace(/\s+/g, ' ').replace(/[""]/g, '"').replace(/['']/g, "'"); // normalize quotes/space
   return s.trim();
 }
 
-/** Extract secret from a request (URL param or JSON body). */
+/**
+ * Extract authentication secret from HTTP request.
+ * Checks both URL parameters and JSON body.
+ * @param {Object} e - Request event object
+ * @returns {string} Secret string or empty if not found
+ */
 function secretFromRequest(e) {
   if (!e) return '';
   try {
@@ -110,6 +179,10 @@ function secretFromRequest(e) {
 
 // ---------- server_* endpoints for control panel ----------
 
+/**
+ * Get current bot configuration state.
+ * @returns {Object} {ok: true, data: {lastStartId, schedChannel, weeklyChannel, resultsChannel}}
+ */
 function server_getState() {
   try {
     const state = {
@@ -124,6 +197,12 @@ function server_getState() {
   }
 }
 
+/**
+ * Set the starting message ID for polling.
+ * @param {string} secret - Authentication secret
+ * @param {string} id - Discord message ID (snowflake)
+ * @returns {Object} {ok: true, data: {id}} or {ok: false, error}
+ */
 function server_setStartId(secret, id) {
   try {
     checkSecret(secret);
@@ -136,6 +215,11 @@ function server_setStartId(secret, id) {
   }
 }
 
+/**
+ * Clear the stored starting message ID.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {cleared: true}} or {ok: false, error}
+ */
 function server_clearStartId(secret) {
   try {
     checkSecret(secret);
@@ -146,6 +230,10 @@ function server_clearStartId(secret) {
   }
 }
 
+/**
+ * Verify which secrets are configured (returns metadata only, not values).
+ * @returns {Object} {ok: true, data: {[key]: {present: boolean, length: number}}}
+ */
 function server_verifySecrets() {
   try {
     var sp = PropertiesService.getScriptProperties();
@@ -166,7 +254,12 @@ function server_verifySecrets() {
   }
 }
 
-// Clear the stored IDs (header/table) and content-hash for the CURRENT weekKey
+/**
+ * Clear the stored Discord message IDs and content hashes for the current week.
+ * Forces a full re-post on next upsert.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {weekKey, cleared, prevIds}} or {ok: false, error}
+ */
 function server_resetWeeklyMsgIds(secret) {
   try {
     if (typeof checkSecret === 'function') checkSecret(secret);
@@ -193,11 +286,20 @@ function server_resetWeeklyMsgIds(secret) {
   }
 }
 
-/** Alias for HTML control panel compatibility */
+/**
+ * Alias for HTML control panel compatibility.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} Result from server_resetWeeklyMsgIds()
+ */
 function server_resetMsgIdsForCurrent(secret) {
   return server_resetWeeklyMsgIds(secret);
 }
 
+/**
+ * Delete all Discord messages for the current week's cluster (header + tables + rematches).
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {weekKey, deleted: {attempted, ok, fail}}} or {ok: false, error}
+ */
 function server_deleteWeeklyCluster(secret) {
   try {
     checkSecret(secret);
@@ -265,6 +367,11 @@ function server_deleteWeeklyCluster(secret) {
   }
 }
 
+/**
+ * Post or update the weekly Discord message boards for the current week.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {action, ...}} or {ok: false, error}
+ */
 function server_postOrUpdate(secret) {
   try {
     checkSecret(secret);
@@ -277,7 +384,13 @@ function server_postOrUpdate(secret) {
   }
 }
 
-/** Public: Start polling from a specific message ID (inclusive). */
+/**
+ * Start polling Discord messages from a specific message ID (inclusive).
+ * Processes all messages starting from and including the specified ID.
+ * @param {string} secret - Authentication secret
+ * @param {string} startId - Discord message ID to start from (inclusive)
+ * @returns {Object} {ok: true, data: {processed, updatedPairs, errors, lastPointer, tookMs}}
+ */
 function server_startPollingFrom(secret, startId) {
   try {
     checkSecret(secret);
@@ -293,7 +406,12 @@ function server_startPollingFrom(secret, startId) {
   }
 }
 
-/** Public: Continue polling from last pointer (exclusive). */
+/**
+ * Continue polling Discord messages from the last saved pointer (exclusive).
+ * Processes new messages since the last poll.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {processed, updatedPairs, errors, lastPointer, tookMs}}
+ */
 function server_startPolling(secret) {
   try {
     checkSecret(secret);
@@ -310,67 +428,12 @@ function server_startPolling(secret) {
   }
 }
 
-
-// ----- OAuth callback endpoints for Twitch integration (if used) -----
-
-function doGet(e) {
-  try {
-    // Serve control panel UI
-    const p = e && e.parameter;
-    if (p && (p.op === 'panel' || p.view === 'panel' || p.ui === '1')) {
-      return HtmlService.createHtmlOutputFromFile('ktp_control_panel')
-        .setTitle('KTP Weekly Matches Control Panel')
-        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-    }
-    // Version info endpoint
-    if (p.op === 'version' || p.op === 'v') {
-      const info = (typeof getVersionInfo === 'function') ? getVersionInfo() : { version: '0.0.0', date: 'unknown', formatted: 'v0.0.0 (unknown)' };
-      return json(ok(info));
-    }
-    // Basic ping test
-    if (!p || !p.op || p.op === 'ping') {
-      return json(ok({ now: new Date().toISOString() }));
-    }
-    // Twitch OAuth callback (saveTwitch)
-    if (p.op === 'saveTwitch') {
-      const secret = secretFromRequest(e);
-      checkSecret(secret);
-      const userId = String(p.userId || '').trim();
-      const twitchUrl = String(p.twitch || p.twitchUrl || '').trim();
-      if (!/^\d{5,30}$/.test(userId)) throw new Error('Invalid userId');
-      if (!twitchUrl) throw new Error('Missing twitchUrl');
-      saveTwitchForUser(userId, twitchUrl);
-      return json(ok({ userId: userId, twitchUrl: twitchUrl }));
-    }
-    return json(error('Unknown op'));
-  } catch (e2) {
-    return json(error(e2));
-  }
-}
-
-function doPost(e) {
-  try {
-    let body = {};
-    if (e && e.postData && e.postData.type === 'application/json') {
-      try { body = JSON.parse(e.postData.contents || '{}'); } catch (err) { body = {}; }
-    }
-    const op = body.op ? String(body.op) : (e.parameter && e.parameter.op ? String(e.parameter.op) : '');
-    if (op === 'saveTwitch') {
-      const secret = secretFromRequest(e);
-      checkSecret(secret);
-      const userId = String(body.userId != null ? body.userId : (e.parameter && e.parameter.userId) || '').trim();
-      const twitchUrl = String(body.twitchUrl != null ? body.twitchUrl : (e.parameter && e.parameter.twitchUrl) || '').trim();
-      if (!/^\d{5,30}$/.test(userId)) throw new Error('Invalid userId');
-      if (!twitchUrl) throw new Error('Missing twitchUrl');
-      saveTwitchForUser(userId, twitchUrl);
-      return json(ok({ userId: userId, twitchUrl: twitchUrl }));
-    }
-    return json(error('Unknown op'));
-  } catch (e2) {
-    return json(error(e2));
-  }
-}
-
+/**
+ * Test connectivity to the Discord relay server.
+ * Attempts to fetch recent messages and optional health/whoami endpoints.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {messages, health, whoami, ...errors}} or {ok: false, error}
+ */
 function server_probeRelay(secret) {
   try {
     checkSecret(secret); // your webapp secret check
@@ -395,6 +458,12 @@ function server_probeRelay(secret) {
   }
 }
 
+/**
+ * Probe all configured Discord relay routes to verify connectivity.
+ * Tests GET-friendly endpoints (health, whoami) and message fetching.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {health, whoami, messages, paths}} or {ok: false, error}
+ */
 function server_probeRelayRoutes(secret) {
   try {
     checkSecret(secret);
@@ -517,5 +586,80 @@ function server_backprocessMatch(secret, division, homeTeam, awayTeam, whenText,
 
   } catch (e) {
     return error(e);
+  }
+}
+
+// ----- HTTP Handlers (doGet / doPost) -----
+
+/**
+ * Handle HTTP GET requests to the web app.
+ * Supports control panel UI, version info, ping test, and Twitch OAuth callback.
+ * @param {Object} e - Event object with query parameters
+ * @param {Object} e.parameter - Query string parameters
+ * @returns {HtmlService.HtmlOutput|ContentService.TextOutput} HTML page or JSON response
+ */
+function doGet(e) {
+  try {
+    // Serve control panel UI
+    const p = e && e.parameter;
+    if (p && (p.op === 'panel' || p.view === 'panel' || p.ui === '1')) {
+      return HtmlService.createHtmlOutputFromFile('ktp_control_panel')
+        .setTitle('KTP Weekly Matches Control Panel')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
+    // Version info endpoint
+    if (p.op === 'version' || p.op === 'v') {
+      const info = (typeof getVersionInfo === 'function') ? getVersionInfo() : { version: '0.0.0', date: 'unknown', formatted: 'v0.0.0 (unknown)' };
+      return json(ok(info));
+    }
+    // Basic ping test
+    if (!p || !p.op || p.op === 'ping') {
+      return json(ok({ now: new Date().toISOString() }));
+    }
+    // Twitch OAuth callback (saveTwitch)
+    if (p.op === 'saveTwitch') {
+      const secret = secretFromRequest(e);
+      checkSecret(secret);
+      const userId = String(p.userId || '').trim();
+      const twitchUrl = String(p.twitch || p.twitchUrl || '').trim();
+      if (!/^\d{5,30}$/.test(userId)) throw new Error('Invalid userId');
+      if (!twitchUrl) throw new Error('Missing twitchUrl');
+      saveTwitchForUser(userId, twitchUrl);
+      return json(ok({ userId: userId, twitchUrl: twitchUrl }));
+    }
+    return json(error('Unknown op'));
+  } catch (e2) {
+    return json(error(e2));
+  }
+}
+
+/**
+ * Handle HTTP POST requests to the web app.
+ * Currently supports Twitch OAuth callback operations via POST.
+ * @param {Object} e - Event object with POST data
+ * @param {Object} e.postData - POST body data
+ * @param {Object} e.parameter - Query string parameters
+ * @returns {ContentService.TextOutput} JSON response
+ */
+function doPost(e) {
+  try {
+    let body = {};
+    if (e && e.postData && e.postData.type === 'application/json') {
+      try { body = JSON.parse(e.postData.contents || '{}'); } catch (err) { body = {}; }
+    }
+    const op = body.op ? String(body.op) : (e.parameter && e.parameter.op ? String(e.parameter.op) : '');
+    if (op === 'saveTwitch') {
+      const secret = secretFromRequest(e);
+      checkSecret(secret);
+      const userId = String(body.userId != null ? body.userId : (e.parameter && e.parameter.userId) || '').trim();
+      const twitchUrl = String(body.twitchUrl != null ? body.twitchUrl : (e.parameter && e.parameter.twitchUrl) || '').trim();
+      if (!/^\d{5,30}$/.test(userId)) throw new Error('Invalid userId');
+      if (!twitchUrl) throw new Error('Missing twitchUrl');
+      saveTwitchForUser(userId, twitchUrl);
+      return json(ok({ userId: userId, twitchUrl: twitchUrl }));
+    }
+    return json(error('Unknown op'));
+  } catch (e2) {
+    return json(error(e2));
   }
 }

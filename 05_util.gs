@@ -1,5 +1,26 @@
 // =======================
-// util.gs – General helper functions (dates, strings, caching, logging, etc.)
+// 05_util.gs - General Utilities & Helpers
+// =======================
+// Purpose: String formatting, date/time, hashing, caching, table rendering, snowflake math
+// Dependencies: 00_config.gs
+// Used by: All modules
+//
+// Functions in this module:
+// Version: getVersionInfo, logVersionToDiscord
+// Strings: ktpEmoji, normalizeWhitespace, isJustPings, decStringMinusOne, normalizeMap, normalizeTeamText
+// Dates: parseDateFromText, getTimezone, discordEpochAt9pmFromISO
+// Formatting: formatWeeklyNotice
+// Snowflakes: compareSnowflakes, maxSnowflake
+// Tables: repeat, padRight, padLeft, truncate, padCenter, getTableWidths, formatVsCell, formatVsHeader, formatVsRow
+// Helpers: isBye, idFromRelay, ensureFence, stripFence, chunkByLimit
+// Hashing: hashString, sha256Hex, safeHeaderHash, safeEmbedsHash
+// Caching: cache, cacheGetJson, cachePutJson
+// Teams: loadTeamAliases, getTeamIndexCached
+// Embeds: tablesBodyToEmbeds
+// Sheets: getDivisionSheets, getSheetByName, getSeasonInfo, colIdx, getGridCols
+// Cells: getRemainingTime, isNumCell, isWLT, parseEtDate, blockHeaderTop
+//
+// Total: 47 functions
 // =======================
 
 /**
@@ -32,12 +53,26 @@ function logVersionToDiscord() {
   }
 }
 
+/**
+ * Get KTP custom emoji string for Discord.
+ * @returns {string} Discord emoji format <:ktp:ID>
+ */
 function ktpEmoji() { return '<:ktp:' + KTP_EMOJI_ID + '>'; }
 
+/**
+ * Normalize whitespace in strings (collapse spaces, normalize newlines).
+ * @param {string} s - String to normalize
+ * @returns {string} Normalized string
+ */
 function normalizeWhitespace(s) {
   return String(s || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
 }
 
+/**
+ * Check if string is just Discord pings/mentions with no real content.
+ * @param {string} s - String to check
+ * @returns {boolean} True if string is just pings/emojis
+ */
 function isJustPings(s) {
   // Heuristic: if after removing mentions/emojis we have almost nothing, treat as pings
   var t = String(s || '')
@@ -49,6 +84,11 @@ function isJustPings(s) {
   return t.length < 3;
 }
 
+/**
+ * Decrement a numeric string by 1 (used for Discord snowflake arithmetic).
+ * @param {string} s - Numeric string
+ * @returns {string|null} Decremented string or null if invalid
+ */
 function decStringMinusOne(s) {
   s = String(s || '').trim();
   if (!/^\d+$/.test(s)) return null;
@@ -70,8 +110,36 @@ function decStringMinusOne(s) {
   return out || '0';
 }
 
+/**
+ * Normalize map key to lowercase (dod_*).
+ * @param {string} s - Map name
+ * @returns {string} Normalized lowercase map name
+ */
+function normalizeMap(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
+/**
+ * Normalize team text for comparison (lowercase, alphanumeric only).
+ * @param {string} s - Team name
+ * @returns {string} Normalized team name
+ */
+function normalizeTeamText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // ----- DATE & TIME HELPERS -----
-/** Parse a Date from text like "9/28", "09-28-2025", or "Sep 28". */
+
+/**
+ * Parse a Date from text like "9/28", "09-28-2025", or "Sep 28".
+ * @param {string} text - Text containing a date
+ * @param {number} refYear - Reference year for dates without year
+ * @returns {Date|null} Parsed date or null if cannot parse
+ */
 function parseDateFromText(text, refYear) {
   const s = String(text || '');
   const m = s.match(/\b(\d{1,2})[\/\.-](\d{1,2})(?:[\/\.-](\d{2,4}))?\b/);
@@ -89,12 +157,21 @@ function parseDateFromText(text, refYear) {
   return null;
 }
 
-/** Project timezone (or override TZ from script properties). */
+/**
+ * Project timezone (or override TZ from script properties).
+ * @returns {string} Timezone string (default: America/New_York)
+ */
 function getTimezone() {
   const sp = PropertiesService.getScriptProperties();
   return sp.getProperty('TZ') || Session.getScriptTimeZone() || 'America/New_York';
 }
 
+/**
+ * Convert ISO date to Discord epoch timestamp at 9:00 PM.
+ * @param {string} dateISO - Date in ISO format (YYYY-MM-DD)
+ * @param {string} tz - Timezone (optional, default from getTimezone)
+ * @returns {number|null} Unix epoch timestamp or null
+ */
 function discordEpochAt9pmFromISO(dateISO, tz) {
   if (!dateISO) return null;
   tz = tz || (typeof getTimezone === 'function' ? getTimezone() : 'America/New_York');
@@ -105,8 +182,14 @@ function discordEpochAt9pmFromISO(dateISO, tz) {
   return Math.floor(dt.getTime() / 1000);
 }
 
-// ----- STRING & TEXT HELPERS -----
-/** Normalize generic token text (lowercase, strip non-alphanumeric). */
+// ----- FORMATTING HELPERS -----
+
+/**
+ * Format weekly notice message for Discord with season/map/action info.
+ * @param {Object} week - Week object {seasonWeek, mapRef, tz}
+ * @param {string} actionWord - Action word (Posted/Edited/etc)
+ * @returns {string} Formatted notice message with emoji
+ */
 function formatWeeklyNotice(week, actionWord) {
   var tz = (week && week.tz) || (typeof getTimezone === 'function' ? getTimezone() : 'America/New_York');
   var season = (week && week.seasonWeek) || '';
@@ -121,29 +204,26 @@ function formatWeeklyNotice(week, actionWord) {
     ts + ' ' + ktpEmoji();
 }
 
-/** Normalize map key to lowercase (dod_*). */
-function normalizeMap(s) {
-  return String(s || '').trim().toLowerCase();
-}
-
-function normalizeTeamText(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 // ----- SNOWFLAKE (Discord ID) HELPERS -----
 
-/** Compare two Discord snowflake IDs (as strings). Returns -1, 0, or 1. */
+/**
+ * Compare two Discord snowflake IDs (as strings). Returns -1, 0, or 1.
+ * @param {string} a - First snowflake ID
+ * @param {string} b - Second snowflake ID
+ * @returns {number} -1 if a<b, 0 if a==b, 1 if a>b
+ */
 function compareSnowflakes(a, b) {
   if (BigInt(a) < BigInt(b)) return -1;
   if (BigInt(a) > BigInt(b)) return 1;
   return 0;
 }
 
-/** Return the larger of two Discord snowflake IDs (as strings). */
+/**
+ * Return the larger of two Discord snowflake IDs (as strings).
+ * @param {string} a - First snowflake ID
+ * @param {string} b - Second snowflake ID
+ * @returns {string} Larger snowflake ID
+ */
 function maxSnowflake(a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -152,41 +232,104 @@ function maxSnowflake(a, b) {
 
 // ---------- Table formatting helpers (single source of truth) ----------
 
-// Repeat a string n times (used for separators)
+/**
+ * Repeat a string n times (used for separators).
+ * @param {string} ch - Character or string to repeat
+ * @param {number} n - Number of times to repeat
+ * @returns {string} Repeated string
+ */
 function repeat(ch, n) {
   ch = String(ch || '');
   n = Math.max(0, n | 0);
   return (typeof ch.repeat === 'function') ? ch.repeat(n) : new Array(n + 1).join(ch);
 }
 
+/**
+ * Pad string on the right to width n.
+ * @param {string} s - String to pad
+ * @param {number} n - Target width
+ * @returns {string} Right-padded string
+ */
 function padRight(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return s + (k ? Array(k + 1).join(' ') : ''); }
+
+/**
+ * Pad string on the left to width n.
+ * @param {string} s - String to pad
+ * @param {number} n - Target width
+ * @returns {string} Left-padded string
+ */
 function padLeft(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return (k ? Array(k + 1).join(' ') : '') + s; }
+
+/**
+ * Truncate string to width n with ellipsis.
+ * @param {string} s - String to truncate
+ * @param {number} n - Max width
+ * @returns {string} Truncated string
+ */
 function truncate(s, n) { s = String(s || ''); return (s.length > n) ? (s.slice(0, n - 1) + '…') : s; }
+
+/**
+ * Pad string centered to width n.
+ * @param {string} s - String to pad
+ * @param {number} n - Target width
+ * @returns {string} Center-padded string
+ */
 function padCenter(s, n) {s = String(s || ''); var k = Math.max(0, n - s.length), L = Math.floor(k / 2), R = k - L;  return (L ? Array(L + 1).join(' ') : '') + s + (R ? Array(R + 1).join(' ') : '');}
 
-// Column widths used by all tables.
-// COL1 = "Home vs Away" column width, COL2 = "Scheduled", COL3 = "Shoutcaster"
+/**
+ * Get column widths used by all tables.
+ * COL1 = "Home vs Away" column width, COL2 = "Scheduled", COL3 = "Shoutcaster"
+ * @returns {Object} {COL1: 43, COL2: 22, COL3: 12}
+ */
 function getTableWidths() {
   return { COL1: 43, COL2: 22, COL3: 12 };
 }
 
+/**
+ * Format "Home vs Away" cell with centered alignment and truncation.
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @param {number} col1 - Total column width
+ * @returns {string} Formatted cell with "vs" separator
+ */
 function formatVsCell(home, away, col1) {
   var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
   home = truncate(String(home || ''), L); away = truncate(String(away || ''), R);
   return padLeft(home, L) + token + padRight(away, R);
 }
 
+/**
+ * Format table header with "Home vs Away" labels.
+ * @param {number} col1 - Total column width
+ * @returns {string} Formatted header cell
+ */
 function formatVsHeader(col1) { return formatVsCell('Home', 'Away', col1); }
 
-// Format a single "Home vs Away" cell to match header alignment
+/**
+ * Format a single "Home vs Away" cell to match header alignment.
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @param {number} col1 - Total column width
+ * @returns {string} Formatted row cell
+ */
 function formatVsRow(home, away, col1) {
   var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
   home = truncate(String(home || ''), L); away = truncate(String(away || ''), R);
   return padLeft(home, L) + token + padRight(away, R);
 }
 
+/**
+ * Check if a team name is a BYE (case-insensitive).
+ * @param {string} s - Team name to check
+ * @returns {boolean} True if the string is "BYE"
+ */
 function isBye(s) { return /^\s*BYE\s*$/i.test(String(s || '')); }
 
+/**
+ * Extract message ID from relay response (handles various response structures).
+ * @param {*} resp - Relay response (string, object, or nested structure)
+ * @returns {string|null} Message ID or null if not found
+ */
 function idFromRelay(resp) {
   try {
     if (!resp && resp !== 0) return null;
@@ -198,18 +341,34 @@ function idFromRelay(resp) {
   return null;
 }
 
+/**
+ * Wrap content in markdown code fence if not already wrapped.
+ * @param {string} s - Content to wrap
+ * @returns {string} Content wrapped in ```text fence or original if already wrapped
+ */
 function ensureFence(s) {
   s = String(s || '').trim();
   if (!s) return '';
   return s.startsWith('```') ? s : ('```text\n' + s + '\n```');
 }
 
+/**
+ * Remove markdown code fence wrapper from content.
+ * @param {string} s - Content to unwrap
+ * @returns {string} Content without fence or original if no fence found
+ */
 function stripFence(s) {
   s = String(s || '');
   var m = s.match(/^```[\s\S]*?\n([\s\S]*?)\n```$/);
   return m ? m[1] : s;
 }
 
+/**
+ * Split text into chunks by character limit, preserving line boundaries where possible.
+ * @param {string} raw - Text to split
+ * @param {number} maxLen - Maximum length per chunk (default 1900)
+ * @returns {Array<string>} Array of text chunks
+ */
 function chunkByLimit(raw, maxLen) {
   maxLen = maxLen || 1900; // keep headroom for safety
   var out = [];
@@ -235,9 +394,19 @@ function chunkByLimit(raw, maxLen) {
 }
 
 // ----- HASH HELPERS -----
+
+/**
+ * Hash a string using SHA-256.
+ * @param {string} s - String to hash
+ * @returns {string} Hexadecimal hash string
+ */
 function hashString(s) { return sha256Hex(String(s || '')); }
 
-/** 2k-safe hash for strings/objects */
+/**
+ * Compute SHA-256 hash and return as hexadecimal string (2k-safe hash for strings/objects).
+ * @param {string} s - String to hash
+ * @returns {string} SHA-256 hash in hex format
+ */
 function sha256Hex(s) {
   var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(s), Utilities.Charset.UTF_8);
   var out = '';
@@ -247,7 +416,11 @@ function sha256Hex(s) {
   }
   return out;
 }
-/** remove volatile fields (timestamp/footer) before hashing header */
+/**
+ * Hash header object after removing volatile fields (timestamp/footer) to detect content changes.
+ * @param {Object} headerObj - Header object with embeds
+ * @returns {string} SHA-256 hash of stable content
+ */
 function safeHeaderHash(headerObj) {
   try {
     var h = JSON.parse(JSON.stringify(headerObj || {}));
@@ -259,7 +432,11 @@ function safeHeaderHash(headerObj) {
   } catch (_) { return ''; }
 }
 
-// Hash embeds without footer noise (like safeHeaderHash)
+/**
+ * Hash embeds array after removing footer fields to detect content changes (like safeHeaderHash).
+ * @param {Array} embeds - Array of Discord embed objects
+ * @returns {string} SHA-256 hash of stable embed content
+ */
 function safeEmbedsHash(embeds) {
   try {
     var x = JSON.parse(JSON.stringify(embeds || []));
@@ -276,20 +453,40 @@ function safeEmbedsHash(embeds) {
 
 // ----- CACHING HELPERS -----
 
+/**
+ * Get script cache instance.
+ * @returns {Cache} Script cache service
+ */
 function cache() { return CacheService.getScriptCache(); }
 
+/**
+ * Get JSON object from cache.
+ * @param {string} key - Cache key
+ * @returns {*|null} Parsed JSON object or null if not found/invalid
+ */
 function cacheGetJson(key) {
   const s = cache().get(key);
   if (!s) return null;
   try { return JSON.parse(s); } catch (e) { return null; }
 }
 
+/**
+ * Store JSON object in cache with TTL.
+ * @param {string} key - Cache key
+ * @param {*} obj - Object to store (will be JSON stringified)
+ * @param {number} ttlSec - Time to live in seconds (default 300, max 21600)
+ */
 function cachePutJson(key, obj, ttlSec) {
   cache().put(key, JSON.stringify(obj || {}), Math.min(21600, Math.max(30, ttlSec || 300)));
 }
 
 let TEAM_ALIAS_CACHE = null;
 
+/**
+ * Load team aliases from _Aliases sheet (cached).
+ * Returns map of aliasUpper -> canonicalUpper for team name normalization.
+ * @returns {Object} Alias map object
+ */
 function loadTeamAliases() {
   if (TEAM_ALIAS_CACHE) return TEAM_ALIAS_CACHE;
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -309,12 +506,13 @@ function loadTeamAliases() {
   return aliasMap;
 }
 
+var TEAM_INDEX_CACHE = null;
+
 /**
  * Build and cache team index for fuzzy team matching.
- * Returns { teams: [ { name, division, aliases: [] }, ... ] }
  * Uses TEAM_CANON_RANGE (A3:A22) from each division sheet + _Aliases sheet.
+ * @returns {Object} Team index {teams: [{name, division, aliases}, ...]}
  */
-var TEAM_INDEX_CACHE = null;
 function getTeamIndexCached() {
   if (TEAM_INDEX_CACHE) return TEAM_INDEX_CACHE;
 
@@ -356,11 +554,10 @@ function getTeamIndexCached() {
 
 
 /**
- * Convert a big tables body (multiple code-fenced sections) into
- * one or more embeds for a single Discord message.
- *
- * Strategy: split on blank lines between sections, pack sections into
- * chunks <= ~3900 chars, preserving the existing ``` fences inside sections.
+ * Convert large tables body (multiple code-fenced sections) into Discord embeds.
+ * Splits on blank lines between sections, packs sections into chunks <= ~3900 chars.
+ * @param {string} body - Tables body content with code fences
+ * @returns {Array} Array of Discord embed objects with descriptions
  */
 function tablesBodyToEmbeds(body) {
   var MAX = 3900; // under 4096 to allow small headroom
@@ -402,7 +599,10 @@ function tablesBodyToEmbeds(body) {
 
 // ----- SHEET HELPERS -----
 
-/** Get list of division sheet names (from constant DIVISIONS or stored property). */
+/**
+ * Get list of division sheet names (from constant DIVISIONS or stored property).
+ * @returns {Array<string>} Array of division sheet names (e.g., ['Bronze', 'Silver', 'Gold'])
+ */
 function getDivisionSheets() {
   // Use constant DIVISIONS if available and non-empty
   if (Array.isArray(DIVISIONS) && DIVISIONS.length) {
@@ -420,7 +620,12 @@ function getDivisionSheets() {
   return ['Bronze', 'Silver', 'Gold'];
 }
 
-/** Returns a sheet by name from the configured spreadsheet. */
+/**
+ * Get a sheet by name from the configured spreadsheet.
+ * @param {string} sheetName - Sheet name to retrieve
+ * @returns {Sheet} Google Sheets sheet object
+ * @throws {Error} If SPREADSHEET_ID not configured
+ */
 function getSheetByName(sheetName) {
   if (!SPREADSHEET_ID) {
     throw new Error('SPREADSHEET_ID not configured in Script Properties');
@@ -429,6 +634,10 @@ function getSheetByName(sheetName) {
   return ss.getSheetByName(sheetName);
 }
 
+/**
+ * Get season info string from SEASON_INFO sheet cell A1.
+ * @returns {string} Season info string or empty string if not found
+ */
 function getSeasonInfo() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sh = ss.getSheetByName(SEASON_INFO);
@@ -437,6 +646,11 @@ function getSeasonInfo() {
   return String(v || '').trim();
 }
 
+/**
+ * Convert column letter(s) to 1-based column index (A=1, B=2, AA=27, etc).
+ * @param {string} letter - Column letter(s)
+ * @returns {number} 1-based column index
+ */
 function colIdx(letter) {
   letter = String(letter || '').toUpperCase();
   var n = 0;
@@ -444,6 +658,11 @@ function colIdx(letter) {
   return n || 1;
 }
 
+/**
+ * Get grid column indices from script properties (or defaults).
+ * Returns indices for Win/Loss, Team, Score columns for both teams.
+ * @returns {Object} {WL1, T1, S1, WL2, T2, S2} column indices
+ */
 function getGridCols() {
   var sp = PropertiesService.getScriptProperties();
   function getOrDef(key, def) { return (sp.getProperty(key) || def); }
@@ -476,16 +695,36 @@ function getRemainingTime(startTime, maxTime) {
   };
 }
 
+/**
+ * Check if cell contains only numeric digits.
+ * @param {string} s - Cell value to check
+ * @returns {boolean} True if cell is numeric
+ */
 function isNumCell(s) { return /^\s*\d+\s*$/.test(String(s || '')); }
 
+/**
+ * Check if cell contains Win/Loss/Tie indicator (W, L, T, FF, F, FORFEIT).
+ * @param {string} s - Cell value to check
+ * @returns {boolean} True if cell is a WLT indicator
+ */
 function isWLT(s) {
   var t = String(s || '').trim().toUpperCase();
   return /^(W|L|T|FF|F|FORFEIT)$/.test(t);
 }
 
+/**
+ * Parse date string using ET timezone (delegates to parseSheetDateET if available).
+ * @param {string} s - Date string to parse
+ * @returns {Date|null} Parsed date or null if invalid
+ */
 function parseEtDate(s) {
   if (typeof parseSheetDateET === 'function') return parseSheetDateET(s);
   var d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
+/**
+ * Calculate top row of block i using grid stride.
+ * @param {number} i - Block index
+ * @returns {number} Row number for block header
+ */
 function blockHeaderTop(i) { return G.firstLabelRow + (i | 0) * G.stride; }

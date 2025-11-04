@@ -1,14 +1,32 @@
 // =======================
-// config.gs (canonical constants)
+// 00_config.gs - Configuration & Constants
+// =======================
+// Purpose: Version info, Discord/Sheet IDs, grid geometry, relay paths, constants
+// Dependencies: None (base module)
+// Used by: All modules
+//
+// Contents:
+// - VERSION, VERSION_DATE constants
+// - Discord channel IDs and emoji config
+// - Google Sheets ID, division names, ranges
+// - Grid geometry (GRID object)
+// - Column indices (COL_*)
+// - Storage keys (LAST_SCHED_KEY, etc)
+// - Performance settings (POLL_MAX_MESSAGES_PER_RUN, etc)
+// - Embed styling constants
+//
 // =======================
 
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.2.0
+ * Version: 3.3.0
  * Last Updated: 2025-11-04
  *
  * CHANGELOG:
+ *
+ * v3.3.0 (2025-11-04) - FEATURE: Full function refactor, JSDoc and summary headers across project file 
+ *
  * v3.2.0 (2025-11-04) - FEATURE: Added back-processing capability for matches without map keys
  *                     - Added server_backprocessMatch() endpoint in 50_webapp.gs
  *                     - Added findMatchAcrossAllWeeks() helper to search all weeks by teams

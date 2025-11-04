@@ -6,25 +6,18 @@
 // Used by: 40_logging.gs, 50_rendering.gs, 60_parser.gs
 //
 // Functions in this module:
-// - sp(k, dflt)
-// - getRelayBase()
-// - getRelayPaths()
-// - getRelayHeaders()
-// - normalizeRelayUrl(path)
-// - getRelayTimeoutMs()
-// - relayFetch(path, opt)
-// - tryParseJson(s)
-// - handleIncomingDiscordEvent(payload)
-// - contentFromRelay(payload)
-// - textFromEmbeds(embeds)
-// - fetchSingleMessageInclusive(channelId, messageId)
-// - fetchChannelMessages(channelId, params)
-// - fetchMessageById(channelId, messageId)
-// - postChannelMessage(channelId, content)
-// - postChannelMessageAdvanced(channelId, content, embeds)
-// - editChannelMessage(channelId, messageId, newContent)
-// - editChannelMessageAdvanced(channelId, messageId, content, embeds)
-// - deleteMessage(channelId, messageId)
+// Config helpers:
+//   sp, getRelayBase, getRelayPaths, getRelayHeaders, normalizeRelayUrl, getRelayTimeoutMs
+// HTTP core:
+//   relayFetch, tryParseJson
+// Event handling:
+//   handleIncomingDiscordEvent, contentFromRelay, textFromEmbeds
+// Message fetching:
+//   fetchSingleMessageInclusive, fetchChannelMessages, fetchMessageById
+// Message posting:
+//   postChannelMessage, postChannelMessageAdvanced
+// Message editing/deleting:
+//   editChannelMessage, editChannelMessageAdvanced, deleteMessage
 //
 // Total: 19 functions
 // =======================
@@ -34,13 +27,24 @@
 /* =========================
    Relay base / headers / fetch
    ========================= */
-/** Script Property helper */
+
+/**
+ * Script Property helper - reads from script properties with default fallback.
+ * @param {string} k - Property key
+ * @param {*} dflt - Default value if property not found
+ * @returns {string} Property value or default
+ */
 function sp(k, dflt) {
   var v = PropertiesService.getScriptProperties().getProperty(k);
   return (v != null && v !== '') ? String(v) : (dflt == null ? '' : String(dflt));
 }
 
-/** Relay base URL (no trailing slash) */
+/**
+ * Relay base URL (no trailing slash).
+ * Checks multiple property keys and constants.
+ * @returns {string} Relay base URL without trailing slash
+ * @throws {Error} If no relay base URL is configured
+ */
 function getRelayBase() {
   var cands = [
     sp('RELAY_BASE'),
@@ -57,6 +61,10 @@ function getRelayBase() {
   throw new Error('Relay base URL missing (set RELAY_BASE).');
 }
 
+/**
+ * Get configured relay API paths for various operations.
+ * @returns {Object} Object with path properties: messages, message, reply, post, edit, del, dm, react, health, whoami
+ */
 function getRelayPaths() {
   var paths = {
     messages: sp('RELAY_PATH_MESSAGES', '/messages'),
@@ -73,7 +81,10 @@ function getRelayPaths() {
   return paths;
 }
 
-/** Build headers for talking to the relay (adds shared secret in common formats). */
+/**
+ * Build headers for talking to the relay (adds shared secret in common formats).
+ * @returns {Object} Headers object with Content-Type and optional X-Relay-Auth
+ */
 function getRelayHeaders() {
   var secret =
     sp('RELAY_AUTH') ||
@@ -85,7 +96,12 @@ function getRelayHeaders() {
   return h;
 }
 
-/** Normalize a path/URL. Accepts absolute URLs or relative paths. */
+/**
+ * Normalize a path/URL. Accepts absolute URLs or relative paths.
+ * @param {string} path - Path or full URL
+ * @returns {string} Full URL to relay endpoint
+ * @throws {Error} If path is missing or not a string
+ */
 function normalizeRelayUrl(path) {
   if (typeof path !== 'string' || !path) {
     throw new Error('relayFetch: path is missing or not a string');
@@ -96,8 +112,10 @@ function normalizeRelayUrl(path) {
   return base + (path.charAt(0) === '/' ? path : ('/' + path));
 }
 
-
-/** Optional: central place to tune timeouts for relay calls. */
+/**
+ * Optional: central place to tune timeouts for relay calls.
+ * @returns {number} Timeout in milliseconds (default 20000, min 5000)
+ */
 function getRelayTimeoutMs() {
   // Default 20s; adjust if your Cloud Run/Functions are slower
   var sp = PropertiesService.getScriptProperties();
@@ -106,7 +124,13 @@ function getRelayTimeoutMs() {
   return isNaN(n) ? 20000 : Math.max(5000, n);
 }
 
-/** Fetch wrapper */
+/**
+ * Fetch wrapper for relay HTTP calls.
+ * @param {string} path - Relay path or full URL
+ * @param {Object} opt - Options {method, headers, payload}
+ * @returns {*} Parsed JSON response or raw text
+ * @throws {Error} If HTTP status is not 2xx
+ */
 function relayFetch(path, opt) {
   opt = opt || {};
   var url = normalizeRelayUrl(path);
@@ -132,7 +156,11 @@ function relayFetch(path, opt) {
   try { return JSON.parse(body); } catch (_) { return body; }
 }
 
-/** Parse JSON text safely (returns null on failure). */
+/**
+ * Parse JSON text safely (returns null on failure).
+ * @param {string} s - JSON string to parse
+ * @returns {*} Parsed object or null if parsing fails
+ */
 function tryParseJson(s) {
   if (!s) return null;
   try { return JSON.parse(s); } catch (e) { return null; }
@@ -140,6 +168,11 @@ function tryParseJson(s) {
 
 // ---------- RELAY API WRAPPERS ----------
 
+/**
+ * Handle incoming Discord event - parses and updates tables.
+ * @param {Object} payload - Discord event payload from relay
+ * @returns {Object} {ok: boolean, error?: string}
+ */
 function handleIncomingDiscordEvent(payload) {
   var text = contentFromRelay(payload);
   if (!text) return { ok: false, error: 'empty' };
@@ -156,6 +189,12 @@ function handleIncomingDiscordEvent(payload) {
   return { ok: true };
 }
 
+/**
+ * Extract text content from Discord relay payload.
+ * Handles various payload formats and extracts from content, embeds, or replies.
+ * @param {*} payload - Discord payload (string or object)
+ * @returns {string} Extracted text content
+ */
 function contentFromRelay(payload) {
   if (payload == null) return '';
 
@@ -210,6 +249,12 @@ function contentFromRelay(payload) {
 }
 
 /* ----------------------- helpers ----------------------- */
+
+/**
+ * Extract text from Discord embeds (title, description, fields).
+ * @param {Array} embeds - Array of Discord embed objects
+ * @returns {string} Combined text from all embeds
+ */
 function textFromEmbeds(embeds) {
   var out = [];
   for (var i = 0; i < embeds.length; i++) {
@@ -233,6 +278,12 @@ function textFromEmbeds(embeds) {
 
 /* ----------------------- Fetch ----------------------- */
 
+/**
+ * Fetch a single Discord message inclusively (tries multiple methods).
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID
+ * @returns {Object|null} Message object or null if not found
+ */
 function fetchSingleMessageInclusive(channelId, messageId) {
   // 1) Try a dedicated single-message endpoint
   if (typeof fetchMessageById === 'function') {
@@ -264,6 +315,12 @@ function fetchSingleMessageInclusive(channelId, messageId) {
   return null;
 }
 
+/**
+ * Fetch channel messages with optional pagination parameters.
+ * @param {string} channelId - Discord channel ID
+ * @param {Object} params - Parameters {after, around, limit}
+ * @returns {Array} Array of message objects
+ */
 function fetchChannelMessages(channelId, params) {
   params = params || {};
   var p = getRelayPaths();
@@ -274,6 +331,12 @@ function fetchChannelMessages(channelId, params) {
   return relayFetch(p.messages + '?' + qs, { method: 'get' }) || [];
 }
 
+/**
+ * Fetch a single message by ID using the relay's message endpoint.
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID
+ * @returns {Object|null} Message object or null if not found
+ */
 function fetchMessageById(channelId, messageId) {
   var p = getRelayPaths();
   var path = (p.message || '/message') + '/' + encodeURIComponent(channelId) + '/' + encodeURIComponent(messageId);
@@ -283,7 +346,12 @@ function fetchMessageById(channelId, messageId) {
 
 /* ----------------------- Post ----------------------- */
 
-/** POST text message */
+/**
+ * POST text message to Discord channel.
+ * @param {string} channelId - Discord channel ID
+ * @param {string} content - Message content text
+ * @returns {string} Posted message ID or empty string
+ */
 function postChannelMessage(channelId, content) {
   var p = getRelayPaths();
   var path = p.reply || p.post || '/reply';
@@ -294,6 +362,13 @@ function postChannelMessage(channelId, content) {
   return id;
 }
 
+/**
+ * POST message with embeds to Discord channel (advanced).
+ * @param {string} channelId - Discord channel ID
+ * @param {string} content - Message content text
+ * @param {Array} embeds - Array of Discord embed objects
+ * @returns {string} Posted message ID or empty string
+ */
 function postChannelMessageAdvanced(channelId, content, embeds) {
   var p = getRelayPaths();
   var path = p.reply || p.post || '/reply';
@@ -305,6 +380,14 @@ function postChannelMessageAdvanced(channelId, content, embeds) {
 }
 
 /* ----------------------- Edit ----------------------- */
+
+/**
+ * Edit an existing Discord message (text only).
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID to edit
+ * @param {string} newContent - New message content text
+ * @returns {string} Message ID (original or from response)
+ */
 function editChannelMessage(channelId, messageId, newContent) {
   var p = getRelayPaths();
   var path = p.edit || '/edit';
@@ -314,6 +397,14 @@ function editChannelMessage(channelId, messageId, newContent) {
   return id || String(messageId);
 }
 
+/**
+ * Edit an existing Discord message with embeds (advanced).
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID to edit
+ * @param {string} content - New message content text
+ * @param {Array} embeds - Array of Discord embed objects
+ * @returns {string} Message ID (original or from response)
+ */
 function editChannelMessageAdvanced(channelId, messageId, content, embeds) {
   var p = getRelayPaths();
   var path = p.edit || '/edit';
@@ -324,6 +415,13 @@ function editChannelMessageAdvanced(channelId, messageId, content, embeds) {
 }
 
 /* ----------------------- Delete ----------------------- */
+
+/**
+ * Delete a Discord message.
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID to delete
+ * @returns {boolean} True if deletion succeeded (or relay didn't return ok:false)
+ */
 function deleteMessage(channelId, messageId) {
   var p = getRelayPaths();
   var base = p.del || '/delete';

@@ -21,7 +21,13 @@
 // =======================
 
 // ----- Create Weekly Tables -----
-/***** MAIN: upsert header + weekly tables (1 msg) + rematches (N msgs if needed) *****/
+
+/**
+ * MAIN: Upsert header + weekly tables (1 msg) + rematches (N msgs if needed).
+ * Creates or updates Discord messages for weekly matches board.
+ * @param {Object} week - Week object {date, mapRef, blocks, weekKey}
+ * @returns {Object} {ok, weekKey, channelId, headerId, tableId, rematchIds, action, messageIds}
+ */
 function upsertWeeklyDiscordMessage(week) {
   // Normalize week
   week = week || {};
@@ -224,6 +230,12 @@ function upsertWeeklyDiscordMessage(week) {
   };
 }
 
+/**
+ * Render current week tables split by division (Bronze, Silver, Gold).
+ * @param {Object} week - Week object
+ * @param {Object} store - Week store with schedules and shoutcasters
+ * @returns {Array} Array of rendered division table strings
+ */
 function renderCurrentWeekTablesSplit(week, store) {
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var order = ['Bronze', 'Silver', 'Gold'].filter(function (d) { return divs.indexOf(d) !== -1; });
@@ -235,6 +247,14 @@ function renderCurrentWeekTablesSplit(week, store) {
   return parts;
 }
 
+/**
+ * Render a single division's current week table with formatting.
+ * @param {string} division - Division name (Bronze/Silver/Gold)
+ * @param {Object} week - Week object
+ * @param {Object} store - Week store with schedules and shoutcasters
+ * @param {string} mapName - Map name for title
+ * @returns {string} Formatted table string with title, header, and rows
+ */
 function renderDivisionCurrentTable(division, week, store, mapName) {
   var W = getTableWidths();
   var header = formatVsHeader(W.COL1) + ' | ' + padRight('Scheduled', W.COL2) + ' | ' + padRight('Shoutcaster', W.COL3);
@@ -266,8 +286,12 @@ function renderDivisionCurrentTable(division, week, store, mapName) {
   return [title, '```', header, sep].concat(outRows).concat(['```']).join('\n');
 }
 
-// Extract ONLY the data rows from a rendered division table's code fence
-// Keeps the inner padded lines (so alignment remains perfect).
+/**
+ * Extract ONLY the data rows from a rendered division table's code fence.
+ * Keeps the inner padded lines (so alignment remains perfect).
+ * @param {string} rendered - Rendered table string with code fence
+ * @returns {Array} Array of data row strings (without header/separator)
+ */
 function extractTableRows(rendered) {
   if (!rendered) return [];
   var s = String(rendered);
@@ -290,8 +314,11 @@ function extractTableRows(rendered) {
   return rows;
 }
 
-
-/** Render the weekly header embed payload for a given `week` object. */
+/**
+ * Render the weekly header embed payload for a given `week` object.
+ * @param {Object} week - Week object {weekKey, mapRef, seasonWeek, label, tz}
+ * @returns {Object} {embeds: [{title, description, color, footer}]}
+ */
 function renderHeaderEmbedPayload(week) {
   var tz = week.tz || getTimezone();
   var wkKey = String(week.weekKey || '');
@@ -332,8 +359,11 @@ function renderHeaderEmbedPayload(week) {
 
 /**
  * Compose ONE Discord message body for current week Bronze / silver / gold current tables
- * and ONE Discord message body for rematches (if they exist) grouped by map then division
+ * and ONE Discord message body for rematches (if they exist) grouped by map then division.
  * Returns [string] or [] if nothing to post.
+ * @param {Object} week - Week object
+ * @param {Object} store - Week store with schedules and shoutcasters
+ * @returns {Array} Array with single full message body string, or empty array
  */
 function renderTablesPages(week, store) {
   var chunks = [];
@@ -378,6 +408,9 @@ function renderTablesPages(week, store) {
  *  2) If empty, scan for first real match row (skips meta rows)
  *  3) If still empty, try alternate column pairs (C/G, B/F, D/H)
  * Always uses your width helpers to match formatting.
+ * @param {string} division - Division name (Bronze/Silver/Gold)
+ * @param {Object} week - Week object
+ * @returns {string} Rendered table with code fence or empty string
  */
 function renderDivisionWeekTable(division, week) {
   var sh = getSheetByName(division);
@@ -431,6 +464,8 @@ function renderDivisionWeekTable(division, week) {
 
 /**
  * Join Bronze, Silver, Gold pretty tables into ONE body (plain content).
+ * @param {Object} week - Week object
+ * @returns {string} Combined table body for all divisions
  */
 function renderWeeklyTablesBody(week) {
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
@@ -454,6 +489,7 @@ function renderWeeklyTablesBody(week) {
 /**
  * Single combined rematches table (one code fence).
  * Grouped by map → division; banner lines centered on the first '|' divider.
+ * @returns {string} Rendered rematches table body with code fence or empty string
  */
 function renderRematchesTableBody() {
   var makeups = getMakeupMatchesAllDivs();

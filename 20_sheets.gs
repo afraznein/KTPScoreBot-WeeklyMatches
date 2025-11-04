@@ -3,29 +3,28 @@
 // =======================
 // Purpose: Grid reading, block resolution, team/map lookups from spreadsheet
 // Dependencies: 00_config.gs, 05_util.gs
-// Used by: 30_relay.gs, 50_rendering.gs, 60_parser.gs, 70_updates.gs
+// Used by: 30_relay.gs, 55_rendering.gs, 60_parser.gs, 70_updates.gs
 //
 // Functions in this module:
-// - gridMeta()
-// - getAllMapsList()
-// - parseSheetDateET(s)
-// - formatWeekRangeET(d)
-// - findActiveIndexByDate(sheet)
-// - blockTopForIndex(idx)
-// - weekKey(week)
-// - resolveDivisionBlockTop(division, week)
-// - readA(sheet, row)
-// - getAlignedUpcomingWeekOrReport()
-// - deriveWeekMetaFromDivisionTop(division, top)
-// - syncHeaderMetaToTables(week, canonDiv)
-// - getMatchesForDivisionWeek(division, top)
-// - getMakeupMatchesAllDivs(week)
-// - findMatchAcrossAllWeeks(division, homeTeam, awayTeam)
+// Grid/Metadata:
+//   gridMeta, getAllMapsList
+// Date/Time helpers:
+//   parseSheetDateET, formatWeekRangeET
+// Block/Week resolution:
+//   findActiveIndexByDate, blockTopForIndex, weekKey, resolveDivisionBlockTop
+// Sheet reading:
+//   readA, getAlignedUpcomingWeekOrReport, deriveWeekMetaFromDivisionTop
+// Match data retrieval:
+//   syncHeaderMetaToTables, getMatchesForDivisionWeek, getMakeupMatchesAllDivs
+//   findMatchAcrossAllWeeks
 //
 // Total: 15 functions
 // =======================
 
-// Where things live:
+/**
+ * Return grid geometry metadata for weekly blocks in sheets.
+ * @returns {Object} {firstLabelRow, firstMapRow, firstDateRow, stride, matchesPerBlock}
+ */
 function gridMeta() {
   return {
     firstLabelRow: 27,   // A27, A38, A49, ...
@@ -36,7 +35,10 @@ function gridMeta() {
   };
 }
 
-/** Load all canonical maps from General!J2:J (non-blank). */
+/**
+ * Load all canonical maps from General!J2:J (non-blank).
+ * @returns {string[]} Array of canonical map names
+ */
 function getAllMapsList() {
   var sh = getSheetByName('General');
   if (!sh) return [];
@@ -51,6 +53,11 @@ function getAllMapsList() {
   return out;
 }
 
+/**
+ * Parse a sheet date string (M/D or M/D/YY) into Date object in ET timezone.
+ * @param {string} s - Date string from sheet
+ * @returns {Date|null} Date object or null if unparseable
+ */
 function parseSheetDateET(s) {
   s = String(s || '').trim();
   if (!s) return null;
@@ -62,6 +69,11 @@ function parseSheetDateET(s) {
   var d = new Date(iso + 'T00:00:00-04:00'); return isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Format a date as a week range string (e.g., "Jan 5–11" or "Dec 28–Jan 3").
+ * @param {Date} d - Date within the week
+ * @returns {string} Formatted week range string
+ */
 function formatWeekRangeET(d) {
   var tz = 'America/New_York', t = new Date(d.getTime());
   var dow = (+Utilities.formatDate(t, tz, 'u')); // 1..7 (Mon..Sun)
@@ -72,6 +84,11 @@ function formatWeekRangeET(d) {
   return (lm === rm) ? (left + '–' + Utilities.formatDate(end, tz, 'MMM d')) : (left + '–' + right);
 }
 
+/**
+ * Find the active week block index by comparing today's date to sheet dates.
+ * @param {Sheet} sheet - Division sheet to scan
+ * @returns {number} Block index (0-based) or 0 if none found
+ */
 function findActiveIndexByDate(sheet) {
   var G = gridMeta(), tz = 'America/New_York';
   var todayEt = new Date(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd') + 'T00:00:00-04:00');
@@ -88,12 +105,21 @@ function findActiveIndexByDate(sheet) {
   return (lastGood >= 0 ? lastGood : 0);
 }
 
-// Top is the header row (A27, A38, A49, ...)
+/**
+ * Convert block index to header row number (A27, A38, A49, ...).
+ * @param {number} idx - Block index (0-based)
+ * @returns {number} Header row number (1-based)
+ */
 function blockTopForIndex(idx) {
   var G = gridMeta();
   return G.firstLabelRow + (idx | 0) * G.stride;  // 27 + k*11
 }
 
+/**
+ * Generate a week key string "YYYY-MM-DD|mapname" from week object.
+ * @param {Object} week - Week object {date: Date, mapRef: string}
+ * @returns {string} Week key in format "YYYY-MM-DD|mapname"
+ */
 function weekKey(week) {
   var tz = 'America/New_York';
   var d = (week && week.date instanceof Date) ? week.date : (week && week.date ? new Date(week.date) : null);
@@ -111,10 +137,10 @@ function weekKey(week) {
  *      - map-only match   (score 2)
  *      - date-only match  (score 1)
  *   3) Fallback to findActiveIndexByDate(sheet)
- *
- * Returns: integer top row (>=1) or 0 if not found.
+ * @param {string} division - Division name (Bronze/Silver/Gold)
+ * @param {Object} week - Week object with optional blocks, mapRef, date
+ * @returns {number} Top row number (>=1) or 0 if not found
  */
-// Honor the hint first; otherwise find by map/date; otherwise fall back to active index.
 function resolveDivisionBlockTop(division, week) {
   // 0) honor hint
   try {
@@ -170,7 +196,12 @@ function resolveDivisionBlockTop(division, week) {
   return 0;
 }
 
-/** Safe read of column A at a given row (returns trimmed display value or ''). */
+/**
+ * Safe read of column A at a given row (returns trimmed display value or '').
+ * @param {Sheet} sheet - Google Sheet object
+ * @param {number} row - Row number (1-based)
+ * @returns {string} Trimmed display value or empty string
+ */
 function readA(sheet, row) {
   try {
     return String(sheet.getRange('A' + row).getDisplayValue() || '').trim();
@@ -179,6 +210,10 @@ function readA(sheet, row) {
   }
 }
 
+/**
+ * Get the upcoming week metadata from Gold sheet (uses active index by date).
+ * @returns {Object} Week object {date, mapRef, seasonWeekTitle, range, blocks, weekKey}
+ */
 function getAlignedUpcomingWeekOrReport() {
   var G = gridMeta(); var gold = getSheetByName('Gold');
   if (!gold) throw new Error('Sheet "Gold" not found');
@@ -204,7 +239,12 @@ function getAlignedUpcomingWeekOrReport() {
   return week;
 }
 
-// Pull meta for a division from its block header row (top = header row: A27/A38/A49…)
+/**
+ * Pull meta for a division from its block header row (top = header row: A27/A38/A49…).
+ * @param {string} division - Division name
+ * @param {number} top - Header row number (1-based)
+ * @returns {Object|null} {label, mapRef, date, range, epochSec} or null if not found
+ */
 function deriveWeekMetaFromDivisionTop(division, top) {
   var sh = (typeof getSheetByName === 'function') ? getSheetByName(division) : null;
   if (!sh || !top) return null;
@@ -232,6 +272,9 @@ function deriveWeekMetaFromDivisionTop(division, top) {
  * Make the header meta (label/map/date/range/epoch) come from the SAME
  * block as your current tables. Uses Bronze as canonical, unless you pass another division.
  * Also re-populates week.blocks so all divisions share this top.
+ * @param {Object} week - Week object to sync
+ * @param {string} canonicalDivision - Division to use as source (defaults to Bronze)
+ * @returns {Object} Updated week object with synced metadata
  */
 function syncHeaderMetaToTables(week, canonicalDivision) {
   week = week || {};
@@ -262,6 +305,9 @@ function syncHeaderMetaToTables(week, canonicalDivision) {
  * Returns current-week matches for a division.
  * top = header row (A27/A38/…); grid is rows (top+1 .. top+10), cols B..H.
  * Uses C/G for names; skips BYE/blank rows.
+ * @param {string} division - Division name
+ * @param {number} top - Header row number (1-based)
+ * @returns {Array} Array of match objects {home, away, homeScore, awayScore}
  */
 function getMatchesForDivisionWeek(division, top) {
   var sh = (typeof getSheetByName === 'function') ? getSheetByName(division)
@@ -355,14 +401,14 @@ function getMakeupMatchesAllDivs(week) {
       // Skip completely empty headers
       if (!label && !mapRef && !dateTx) continue;
 
-      var dft = parseEtDate(dateTx);
+      var dft = parseSheetDateET(dateTx);
       if (!dft) continue;
 
       // Only include blocks strictly before today (ET)
       if (!(dft.getTime() < todayEt.getTime())) continue;
 
       // Pull the weekly grid band: rows (headerTop+1) .. (headerTop+10), columns B..H (7 cols)
-      var top = blockHeaderTop(bi);                 // A27/A38/...
+      var top = blockTopForIndex(bi);                 // A27/A38/...
       var firstGridRow = top + 1;                   // grid starts one row below header
       var band = sh.getRange(firstGridRow, 2, G.matchesPerBlock, 7).getDisplayValues(); // B..H
 
@@ -380,8 +426,11 @@ function getMakeupMatchesAllDivs(week) {
         if (!home && !away) continue;
         if (isBye(home) || isBye(away)) continue;
 
-        var finishedByScore = isNumCell(sc1) && isNumCell(sc2);
-        var finishedByWLT = isWLT(wl1) && isWLT(wl2);
+        // Check if match is finished by score or W/L/T markers
+        var isNum = function(s) { s = String(s || '').trim(); return s !== '' && !isNaN(Number(s)); };
+        var isWLMarker = function(s) { return /^(W|L|T|FF|FORFEIT)$/i.test(String(s || '').trim()); };
+        var finishedByScore = isNum(sc1) && isNum(sc2);
+        var finishedByWLT = isWLMarker(wl1) && isWLMarker(wl2);
         var played = finishedByScore || finishedByWLT;
 
         if (!played) {
@@ -406,7 +455,11 @@ function getMakeupMatchesAllDivs(week) {
 
 /**
  * Helper: Find a match across all week blocks in a division by team names only.
- * Returns { weekKey, blockTop, row, map } or null if not found.
+ * Returns { weekKey, blockTop, row, map, date } or null if not found.
+ * @param {string} division - Division name (Bronze/Silver/Gold)
+ * @param {string} homeTeam - Home team name
+ * @param {string} awayTeam - Away team name
+ * @returns {Object|null} {weekKey, blockTop, row, map, date} or null if not found
  */
 function findMatchAcrossAllWeeks(division, homeTeam, awayTeam) {
   try {

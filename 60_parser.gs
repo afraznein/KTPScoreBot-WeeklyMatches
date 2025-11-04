@@ -6,36 +6,26 @@
 // Used by: 30_relay.gs (event handlers), 70_updates.gs
 //
 // Functions in this module:
-// - getMapAliasCatalog()
-// - aliasesForMap(canon)
-// - extractMapHint(text)
-// - teamSynonyms()
-// - stripDiscordNoise(s)
-// - extractDivisionHint(s)
-// - splitVsSides(s)
-// - stripOrdinalSuffixes(rawDate)
-// - cleanScheduleText(raw)
-// - resolveTeamAlias(rawInput)
-// - matchTeam(snippet, forcedDivision)
-// - scoreTeamMatch(a, b)
-// - parseWhenFlexible(s, hintDiv, hintMap)
-// - buildWeekListFromSheets()
-// - chooseWeekForPair(division, home, away, weekList, hintMap, rawText, when)
-// - findWeekByMapAndPair(division, map, home, away, weekList)
-// - findWeekByDateAndPair(division, dateObj, home, away, weekList)
-// - findPastUnplayedWeekForPair(division, home, away, weekList)
-// - isSameWeek(d1, d2)
-// - hasTeamsInWeek(week, home, away)
-// - pollAndProcessFromId(channelId, startId, opt)
-// - processOneDiscordMessage(msg)
-// - parseScheduleMessage_v3(text)
+// Map/Division/Team extraction:
+//   getMapAliasCatalog, aliasesForMap, extractMapHint, teamSynonyms
+//   stripDiscordNoise, extractDivisionHint, splitVsSides
+// Text processing & matching:
+//   stripOrdinalSuffixes, cleanScheduleText, resolveTeamAlias
+//   matchTeam, scoreTeamMatch, parseWhenFlexible
+// Week matching logic:
+//   buildWeekListFromSheets, chooseWeekForPair, findWeekByMapAndPair
+//   findWeekByDateAndPair, findPastUnplayedWeekForPair, isSameWeek, hasTeamsInWeek
+// Message processing:
+//   pollAndProcessFromId, processOneDiscordMessage, parseScheduleMessage_v3
 //
 // Total: 23 functions
 // =======================
-// =======================
 // parser.gs – Discord message parsing logic
 // =======================
-/** Build alias→canon map from the General sheet list. Cached per execution. */
+/**
+ * Build alias→canon map from the General sheet list. Cached per execution.
+ * @returns {Object} Map of aliases to canonical map names
+ */
 function getMapAliasCatalog() {
   var canonList = (typeof getAllMapsList === 'function') ? getAllMapsList() : [];
   var aliasToCanon = {};
@@ -50,7 +40,11 @@ function getMapAliasCatalog() {
   return aliasToCanon;
 }
 
-/** Generate useful aliases for a canonical map id like "dod_railyard_b6". */
+/**
+ * Generate useful aliases for a canonical map id like "dod_railyard_b6".
+ * @param {string} canon - Canonical map name
+ * @returns {string[]} Array of aliases (with/without dod_, with/without version suffix, etc.)
+ */
 function aliasesForMap(canon) {
   var c = String(canon || '').toLowerCase();
 
@@ -88,6 +82,8 @@ function aliasesForMap(canon) {
  * Extract a map hint from free text using the alias catalog.
  * Matches whole-word-ish with underscores/hyphens/space flexibility,
  * and prefers longer aliases first to avoid short collisions.
+ * @param {string} text - Text to search for map name
+ * @returns {string|null} Canonical map name or null if not found
  */
 function extractMapHint(text) {
   var t = String(text || '').toLowerCase();
@@ -117,7 +113,10 @@ function extractMapHint(text) {
   return null;
 }
 
-// Optional team synonym map from Script Properties (JSON)
+/**
+ * Optional team synonym map from Script Properties (JSON).
+ * @returns {Object} Map of team synonyms or empty object if not configured
+ */
 function teamSynonyms() {
   try {
     var sp = PropertiesService.getScriptProperties().getProperty('TEAM_SYNONYMS_JSON');
@@ -125,6 +124,11 @@ function teamSynonyms() {
   } catch (_) { return {}; }
 }
 
+/**
+ * Strip Discord formatting noise (mentions, emojis, channels) from text.
+ * @param {string} s - Text to clean
+ * @returns {string} Cleaned text with Discord markup removed
+ */
 function stripDiscordNoise(s) {
   var t = String(s || '');
 
@@ -138,12 +142,22 @@ function stripDiscordNoise(s) {
   return t;
 }
 
+/**
+ * Extract division hint from text (Bronze/Silver/Gold).
+ * @param {string} s - Text to search for division name
+ * @returns {string|null} Division name (capitalized) or null if not found
+ */
 function extractDivisionHint(s) {
   var m = s.match(/\b(bronze|silver|gold)\b\s*:?/i);
   return m ? (m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase()) : null;
 }
 
-// --- Enhanced splitVsSides to handle "between A and B" and strip division hints ---
+/**
+ * Enhanced splitVsSides to handle "between A and B" and strip division hints.
+ * Splits matchup text into two teams, handling various separators (vs, vs., //, -, ;).
+ * @param {string} s - Matchup text (e.g., "Team A vs Team B")
+ * @returns {Object|null} {a: homeTeam, b: awayTeam} or null if cannot split
+ */
 function splitVsSides(s) {
   var norm = s.replace(/\s*-\s*/g, ' - ');
 
@@ -178,10 +192,18 @@ function splitVsSides(s) {
   return { a: a, b: b };
 }
 
-// --- Normalize ordinal suffixes in dates (e.g., 12th → 12) ---
+/**
+ * Normalize ordinal suffixes in dates (e.g., 12th → 12).
+ * @param {string} rawDate - Date string that may contain ordinals
+ * @returns {string} Date string with ordinals removed
+ */
 function stripOrdinalSuffixes(rawDate) { return rawDate.replace(/(\d+)(st|nd|rd|th)/gi, '$1') }
 
-// --- Sanitize raw text for parsing (ignore second timezones, remove foreign weekday mentions) ---
+/**
+ * Sanitize raw text for parsing (ignore second timezones, remove foreign weekday mentions).
+ * @param {string} raw - Raw schedule text
+ * @returns {string} Cleaned text ready for parsing
+ */
 function cleanScheduleText(raw) {
   return raw
     .replace(/\/\s*Domingo.*$/i, '')
@@ -190,7 +212,11 @@ function cleanScheduleText(raw) {
     .replace(/tentative|confirm.*later|likely postponed|we'?ll confirm/gi, '');
 }
 
-// --- Enhanced Team Alias Resolver ---
+/**
+ * Enhanced Team Alias Resolver - resolves team names using _Aliases sheet.
+ * @param {string} rawInput - Raw team name input
+ * @returns {string} Canonical team name or original input if no alias found
+ */
 function resolveTeamAlias(rawInput) {
   TEAM_ALIAS_CACHE = null; // Always force reload from sheet
   TEAM_INDEX_CACHE = null; // Clear team index cache too
@@ -199,8 +225,12 @@ function resolveTeamAlias(rawInput) {
   return aliasMap[upper] || rawInput;
 }
 
-
-// --- Enhanced matchTeam to use aliases ---
+/**
+ * Enhanced matchTeam to use aliases - fuzzy match team name to team index.
+ * @param {string} snippet - Team name snippet to match
+ * @param {string} forcedDivision - Optional division to restrict search to
+ * @returns {Object|null} {name: teamName, division: divisionName} or null if no match
+ */
 function matchTeam(snippet, forcedDivision) {
   var idx = (typeof getTeamIndexCached === 'function') ? getTeamIndexCached() : null;
   if (!idx || !idx.teams || !idx.teams.length) return null;
@@ -232,6 +262,12 @@ function matchTeam(snippet, forcedDivision) {
   return { name: best.name, division: best.division };
 }
 
+/**
+ * Score how well two team name strings match.
+ * @param {string} a - First team name (normalized)
+ * @param {string} b - Second team name (normalized)
+ * @returns {number} Match score (higher is better, 10 = exact match)
+ */
 function scoreTeamMatch(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 10;
@@ -248,6 +284,13 @@ function scoreTeamMatch(a, b) {
   return hits;
 }
 
+/**
+ * Parse flexible date/time text into structured when data.
+ * @param {string} s - Date/time text to parse
+ * @param {string} hintDiv - Optional division hint for context
+ * @param {string} hintMap - Optional map hint for context
+ * @returns {Object} {whenText: string, epochSec?: number} or {whenText: 'TBD'}
+ */
 function parseWhenFlexible(s, hintDiv, hintMap) {
   var tz = 'America/New_York';
   var lower = s.toLowerCase();
@@ -335,7 +378,10 @@ function parseWhenFlexible(s, hintDiv, hintMap) {
   return { epochSec: epoch, whenText: whenText };
 }
 
-/** Build a list of all weeks from all division sheets */
+/**
+ * Build a list of all weeks from all division sheets.
+ * @returns {Array} Array of week objects {division, map, date, top}
+ */
 function buildWeekListFromSheets() {
   var weeks = [];
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
@@ -373,7 +419,18 @@ function buildWeekListFromSheets() {
   return weeks;
 }
 
-// --- Enhanced chooseWeekForPair with weekList threaded into helpers ---
+/**
+ * Enhanced chooseWeekForPair with weekList threaded into helpers.
+ * Choose the correct week block for a match based on map hint, date, or context.
+ * @param {string} division - Division name
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @param {Array} weekList - List of all weeks from buildWeekListFromSheets()
+ * @param {string} hintMap - Optional map hint
+ * @param {string} rawText - Original raw text for context clues
+ * @param {Object} when - Optional when object {epochSec, whenText}
+ * @returns {Object} Week metadata object with weekKey, map, date, etc.
+ */
 function chooseWeekForPair(division, home, away, weekList, hintMap, rawText, when) {
   var wk = (typeof getAlignedUpcomingWeekOrReport === 'function') ? getAlignedUpcomingWeekOrReport() : {};
   if (typeof syncHeaderMetaToTables === 'function') wk = syncHeaderMetaToTables(wk, division || 'Bronze');
@@ -398,13 +455,30 @@ function chooseWeekForPair(division, home, away, weekList, hintMap, rawText, whe
   return wk;
 }
 
-// --- Helper function updates to support weekList injection ---
+/**
+ * Helper function to find week by map and team pair.
+ * @param {string} division - Division name
+ * @param {string} map - Map name
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @param {Array} weekList - List of all weeks
+ * @returns {Object|null} Week object or null if not found
+ */
 function findWeekByMapAndPair(division, map, home, away, weekList) {
   if (!Array.isArray(weekList)) return null;
   map = map.toLowerCase();
   return weekList.find(w => w.division === division && w.map.toLowerCase() === map && hasTeamsInWeek(w, home, away));
 }
 
+/**
+ * Helper function to find week by date and team pair.
+ * @param {string} division - Division name
+ * @param {Date} dateObj - Date object to match against
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @param {Array} weekList - List of all weeks
+ * @returns {Object|null} Week object or null if not found
+ */
 function findWeekByDateAndPair(division, dateObj, home, away, weekList) {
   if (!Array.isArray(weekList)) return null;
   return weekList.find(w => {
@@ -414,6 +488,14 @@ function findWeekByDateAndPair(division, dateObj, home, away, weekList) {
   });
 }
 
+/**
+ * Helper function to find a past unplayed week for a team pair (for make-ups/rematches).
+ * @param {string} division - Division name
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @param {Array} weekList - List of all weeks
+ * @returns {Object|null} Week object or null if not found
+ */
 function findPastUnplayedWeekForPair(division, home, away, weekList) {
   if (!Array.isArray(weekList)) return null;
   for (var i = 0; i < weekList.length; i++) {
@@ -424,6 +506,12 @@ function findPastUnplayedWeekForPair(division, home, away, weekList) {
   return null;
 }
 
+/**
+ * Check if two dates are in the same week (Sunday-based).
+ * @param {Date} d1 - First date
+ * @param {Date} d2 - Second date
+ * @returns {boolean} True if dates are in same week
+ */
 function isSameWeek(d1, d2) {
   var startOfWeek = date => {
     var day = new Date(date);
@@ -435,11 +523,26 @@ function isSameWeek(d1, d2) {
   return startOfWeek(d1).getTime() === startOfWeek(d2).getTime();
 }
 
+/**
+ * Check if a week contains a specific match (by team names).
+ * @param {Object} week - Week object with matches array
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @returns {boolean} True if week contains this matchup
+ */
 function hasTeamsInWeek(week, home, away) {
   if (!week || !Array.isArray(week.matches)) return false;
   return week.matches.some(m => m.home === home && m.away === away);
 }
 
+/**
+ * Poll and process Discord messages from a starting message ID.
+ * Performance-optimized with batch limits and time monitoring.
+ * @param {string} channelId - Discord channel ID to poll
+ * @param {string} startId - Starting message ID
+ * @param {Object} opt - Options {inclusive: boolean, maxProcess: number, maxTime: number}
+ * @returns {Object} {ok: boolean, processed: number, updatedPairs: number, errors: array, lastPointer: string, stats: object}
+ */
 function pollAndProcessFromId(channelId, startId, opt) {
   var successCount = 0;
   var tentativeCount = 0;
@@ -582,7 +685,12 @@ function pollAndProcessFromId(channelId, startId, opt) {
   }
 }
 
-/** Process one Discord message through: content → parse → update */
+/**
+ * Process one Discord message through: content → parse → update.
+ * @param {Object} msg - Discord message object {id, content, author, channel}
+ * @param {number} startTime - Start time timestamp for timeout prevention
+ * @returns {Object} {updated: number, tentative?: boolean, parsed?: object, skipped?: boolean, reason?: string}
+ */
 function processOneDiscordMessage(msg, startTime) {
   if (!msg || !msg.content) return { updated: 0 };
 
@@ -658,6 +766,8 @@ function processOneDiscordMessage(msg, startTime) {
 /**
  * Parse a Discord message (string) into schedule update pairs.
  * Returns { ok, pairs: [{division, home, away, epochSec?, whenText, weekKey}], trace }
+ * @param {string} text - Raw Discord message text
+ * @returns {Object} {ok: boolean, pairs?: array, division?: string, team1?: string, team2?: string, whenText?: string, weekKey?: string, trace: array, error?: string}
  */
 function parseScheduleMessage_v3(text) {
   var trace = [];

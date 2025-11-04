@@ -15,7 +15,11 @@
 // Total: 5 functions
 // =======================
 
-/** Parse "YYYY-MM-DD|map" into a week object with a real Date in local ET. */
+/**
+ * Parse "YYYY-MM-DD|map" into a week object with a real Date in local ET.
+ * @param {string} wkKey - Week key in format "YYYY-MM-DD|mapname"
+ * @returns {Object} {date: Date, mapRef: string, weekKey: string}
+ */
 function weekFromKey(wkKey) {
   var parts = String(wkKey || '').split('|');
   var iso = parts[0] || '';
@@ -25,7 +29,11 @@ function weekFromKey(wkKey) {
   return { date: dt, mapRef: mapRef, weekKey: wkKey };
 }
 
-/** Canonicalize division label. */
+/**
+ * Canonicalize division label to standard capitalized form.
+ * @param {string} d - Division name (e.g., "bronze", "b", "Bronze")
+ * @returns {string} Canonical division name ("Bronze", "Silver", or "Gold")
+ */
 function canonDivision(d) {
   if (!d) return '';
   var s = String(d).trim().toLowerCase();
@@ -36,7 +44,11 @@ function canonDivision(d) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** Ensure the week store has expected shape. */
+/**
+ * Ensure the week store has expected shape with meta, sched, and cast properties.
+ * Mutates the store object to add missing properties.
+ * @param {Object} store - Week store object to validate and normalize
+ */
 function ensureStoreShape(store) {
   if (!store || typeof store !== 'object') return;
   if (!store.meta) store.meta = {};
@@ -48,6 +60,11 @@ function ensureStoreShape(store) {
  * Find the row index (0..9) of a match in the block for a division.
  * - top is the header row (A27/A38/…), grid is rows (top+1..top+10)
  * - compares names in C (home) and G (away)
+ * @param {string} division - Division name (Bronze/Silver/Gold)
+ * @param {number} top - Block header row number (1-based)
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @returns {number} Row index (0-9) or -1 if not found
  */
 function findMatchRowIndex(division, top, home, away) {
   var sh = (typeof getSheetByName === 'function') ? getSheetByName(division) : null;

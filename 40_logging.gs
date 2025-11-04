@@ -6,7 +6,7 @@
 // Used by: 55_rendering.gs, 60_parser.gs, 70_updates.gs
 //
 // Functions in this module:
-// - locLocal(level, event, data)
+// - logLocal(level, event, data)
 // - sendLog(msg)
 // - formatScheduleConfirmationLine(parsed, row, authorId, msgId)
 // - logParsingSummary(successCount, tentativeCount, sourceChannel)
@@ -18,7 +18,12 @@
 
 // ----- LOGGING -----
 
-/** Append a log entry (timestamped) to console and optionally to Discord log channel. */
+/**
+ * Append a log entry (timestamped) to console and optionally to Discord log channel.
+ * @param {string} level - Log level (e.g., "INFO", "ERROR", "WARN")
+ * @param {string} event - Event name or category
+ * @param {*} data - Optional data to include in log (will be JSON stringified)
+ */
 function logLocal(level, event, data) {
   try {
     const ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
@@ -29,7 +34,11 @@ function logLocal(level, event, data) {
   }
 }
 
-/** Send a brief log message to the results log channel (if configured) and write to sheet. */
+/**
+ * Send a brief log message to the results log channel (if configured) and write to sheet.
+ * Posts to Discord RESULTS_LOG_CHANNEL_ID and appends to WM_Log sheet.
+ * @param {string} msg - Message to log
+ */
 function sendLog(msg) {
   // Send to Discord log channel
   try {
@@ -63,6 +72,14 @@ function sendLog(msg) {
   }
 }
 
+/**
+ * Format a confirmation line for a scheduled match.
+ * @param {Object} parsed - Parsed match data {division, map, team1, team2, status, ...}
+ * @param {number|null} row - Row number in sheet or null if unmapped
+ * @param {string} authorId - Discord user ID who reported the match
+ * @param {string} msgId - Discord message ID
+ * @returns {string} Formatted confirmation message with emojis
+ */
 function formatScheduleConfirmationLine(parsed, row, authorId, msgId) {
   const mapShown = parsed.map || '?';
   const left = parsed.team1;
@@ -77,6 +94,12 @@ function formatScheduleConfirmationLine(parsed, row, authorId, msgId) {
   return `${emoji} **${parsed.division}** • \`${mapShown}\` • ${rowBit} — **${left} vs ${right}** (${status})${by}${linkBit}`;
 }
 
+/**
+ * Log a summary of parsing results to Discord log channel.
+ * @param {number} successCount - Number of successfully scheduled matches
+ * @param {number} tentativeCount - Number of tentative/confirming matches
+ * @param {string} sourceChannel - Discord channel name where messages were parsed from
+ */
 function logParsingSummary(successCount, tentativeCount, sourceChannel) {
   const emoji = EMOJI_OK;
   const total = successCount + tentativeCount;
@@ -85,6 +108,14 @@ function logParsingSummary(successCount, tentativeCount, sourceChannel) {
   sendLog(msg);
 }
 
+/**
+ * Log a match entry to the WM_Log sheet in the spreadsheet.
+ * @param {Object} entry - Match entry {division, map, team1, team2, whenText, row, ...}
+ * @param {string} authorId - Discord user ID who reported the match
+ * @param {string} sourceChannel - Discord channel name where match was reported
+ * @param {boolean} isTentative - Whether match is tentative/confirming
+ * @param {boolean} isRematch - Whether this is a rematch
+ */
 function logMatchToWMLog(entry, authorId, sourceChannel, isTentative, isRematch) {
   try {
     if (!SPREADSHEET_ID) return;
@@ -114,6 +145,13 @@ function logMatchToWMLog(entry, authorId, sourceChannel, isTentative, isRematch)
   }
 }
 
+/**
+ * Log a structured event to the WM_Log sheet with level, event, message, and JSON details.
+ * @param {string} level - Log level (INFO, ERROR, WARN, etc.)
+ * @param {string} event - Event name or category
+ * @param {string} message - Human-readable log message
+ * @param {Object} detailsObj - Optional object with additional details (will be JSON stringified)
+ */
 function logToWmSheet(level, event, message, detailsObj) {
   try {
     if (!SPREADSHEET_ID) return;
