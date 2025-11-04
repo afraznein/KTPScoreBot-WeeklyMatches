@@ -6,26 +6,26 @@
 // Used by: 30_relay.gs, 55_rendering.gs, 70_updates.gs
 //
 // Functions in this module:
-// - _weekStoreKey_(wk)
-// - loadWeekStore_(wk)
-// - saveWeekStore_(wk, obj)
-// - _msgIdsKey_(wk)
-// - _loadMsgIds_(wk)
-// - _saveMsgIds_(wk, ids)
-// - _clearMsgIds_(wk)
+// - weekStoreKey(wk)
+// - loadWeekStore(wk)
+// - saveWeekStore(wk, obj)
+// - msgIdsKey(wk)
+// - loadMsgIds(wk)
+// - saveMsgIds(wk, ids)
+// - clearMsgIds(wk)
 //
 // Total: 7 functions
 // =======================
 
 /** Internal helper to form the script property key for weekly store. */
-function _weekStoreKey_(wk) {
+function weekStoreKey(wk) {
   return `WEEKLY_STORE_${wk}`;
 }
 
 /** Load the per-week store (schedules and shoutcasters) for week key `wk`. */
-function loadWeekStore_(wk) {
+function loadWeekStore(wk) {
   const sp = PropertiesService.getScriptProperties();
-  const raw = sp.getProperty(_weekStoreKey_(wk));
+  const raw = sp.getProperty(weekStoreKey(wk));
   if (!raw) return { schedules: {}, shoutcasters: {} };
   try {
     const obj = JSON.parse(raw);
@@ -38,16 +38,16 @@ function loadWeekStore_(wk) {
 }
 
 /** Save the per-week store object for week key `wk`. */
-function saveWeekStore_(wk, obj) {
+function saveWeekStore(wk, obj) {
   PropertiesService.getScriptProperties()
-    .setProperty(_weekStoreKey_(wk), JSON.stringify(obj || { schedules: {}, shoutcasters: {} }));
+    .setProperty(weekStoreKey(wk), JSON.stringify(obj || { schedules: {}, shoutcasters: {} }));
 }
 
-function _msgIdsKey_(wk) { return 'WEEKLY_MSG_IDS::' + String(wk || ''); }
+function msgIdsKey(wk) { return 'WEEKLY_MSG_IDS::' + String(wk || ''); }
 
 /** Load IDs with full back-compat and normalize into a single shape. */
-function _loadMsgIds_(wk) {
-  var raw = PropertiesService.getScriptProperties().getProperty(_msgIdsKey_(wk));
+function loadMsgIds(wk) {
+  var raw = PropertiesService.getScriptProperties().getProperty(msgIdsKey(wk));
   var obj = raw ? (function () { try { return JSON.parse(raw); } catch (_) { return null; } })() : null;
   if (!obj) obj = {};
 
@@ -80,7 +80,7 @@ function _loadMsgIds_(wk) {
 }
 
 /** Save IDs in both new and legacy-friendly shapes. */
-function _saveMsgIds_(wk, ids) {
+function saveMsgIds(wk, ids) {
   var out = {
     header: String(ids.header || ''),
     table: String(ids.table || ''),
@@ -90,10 +90,10 @@ function _saveMsgIds_(wk, ids) {
   };
   // Legacy cluster: [header, ...tables]
   out.cluster = [out.header].concat(out.tables);
-  PropertiesService.getScriptProperties().setProperty(_msgIdsKey_(wk), JSON.stringify(out));
+  PropertiesService.getScriptProperties().setProperty(msgIdsKey(wk), JSON.stringify(out));
   return out;
 }
 
-function _clearMsgIds_(wk) {
-  PropertiesService.getScriptProperties().deleteProperty(_msgIdsKey_(wk));
+function clearMsgIds(wk) {
+  PropertiesService.getScriptProperties().deleteProperty(msgIdsKey(wk));
 }

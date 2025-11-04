@@ -404,7 +404,7 @@ function server_probeRelayRoutes(secret) {
     function tryGet(label, path) {
       if (!path) return results[label] = { skip: true };
       try {
-        var r = relayFetch_(path, { method: 'get' }); // many POST routes won’t accept GET; that’s fine
+        var r = relayFetch_(path, { method: 'get' }); // many POST routes won't accept GET; that's fine
         results[label] = { ok: true, code: 200, sample: r };
       } catch (e) {
         results[label] = { ok: false, error: String(e && e.message || e), path: path };
@@ -431,6 +431,173 @@ function server_probeRelayRoutes(secret) {
     results.paths = p;
 
     return _ok_(results);
+  } catch (e) {
+    return _err_(e);
+  }
+}
+
+// ----- Back-processing endpoint for matches without map keys -----
+
+/**
+ * Helper: Find a match across all week blocks in a division by team names only.
+ * Returns { weekKey, blockTop, row, map } or null if not found.
+ */
+function _findMatchAcrossAllWeeks_(division, homeTeam, awayTeam) {
+  try {
+    var sheet = (typeof getSheetByName === 'function') ? getSheetByName(division) : null;
+    if (!sheet) return null;
+
+    var G = (typeof _gridMeta_ === 'function') ? _gridMeta_() : {
+      firstMapRow: 28,
+      firstDateRow: 29,
+      stride: 11,
+      matchesPerBlock: 10
+    };
+
+    // Normalize team names for comparison
+    var homeNorm = (typeof _normalizeTeamText_ === 'function')
+      ? _normalizeTeamText_(homeTeam)
+      : String(homeTeam || '').toLowerCase().trim();
+    var awayNorm = (typeof _normalizeTeamText_ === 'function')
+      ? _normalizeTeamText_(awayTeam)
+      : String(awayTeam || '').toLowerCase().trim();
+
+    // Scan all week blocks (up to 20 weeks)
+    for (var blockIdx = 0; blockIdx < 20; blockIdx++) {
+      var mapRow = G.firstMapRow + blockIdx * G.stride;
+      var dateRow = G.firstDateRow + blockIdx * G.stride;
+      var blockTop = mapRow - 1;
+
+      if (mapRow > sheet.getLastRow()) break;
+
+      // Read map and date for this block
+      var mapRef = sheet.getRange(mapRow, 1).getDisplayValue().trim();
+      var dateTx = sheet.getRange(dateRow, 1).getDisplayValue().trim();
+
+      if (!mapRef || !dateTx) continue; // No more weeks
+
+      // Parse date to create weekKey
+      var date = (typeof _parseSheetDateET_ === 'function')
+        ? _parseSheetDateET_(dateTx)
+        : new Date(dateTx);
+      if (!date) continue;
+
+      var weekKey = Utilities.formatDate(date, 'America/New_York', 'yyyy-MM-dd') + '|' + mapRef.toLowerCase();
+
+      // Check each match row in this block
+      var matchStartRow = mapRow + 1; // First match row after map/date
+      for (var i = 0; i < G.matchesPerBlock; i++) {
+        var rowNum = matchStartRow + i;
+        if (rowNum > sheet.getLastRow()) break;
+
+        var cols = (typeof getGridCols_ === 'function') ? getGridCols_() : { T1: 3, T2: 7 };
+        var t1 = sheet.getRange(rowNum, cols.T1).getDisplayValue().trim();
+        var t2 = sheet.getRange(rowNum, cols.T2).getDisplayValue().trim();
+
+        if (!t1 || !t2) continue;
+
+        var t1Norm = (typeof _normalizeTeamText_ === 'function')
+          ? _normalizeTeamText_(t1)
+          : t1.toLowerCase().trim();
+        var t2Norm = (typeof _normalizeTeamText_ === 'function')
+          ? _normalizeTeamText_(t2)
+          : t2.toLowerCase().trim();
+
+        // Check if teams match
+        if (t1Norm === homeNorm && t2Norm === awayNorm) {
+          return {
+            weekKey: weekKey,
+            blockTop: blockTop,
+            row: i, // 0-based row index within block
+            map: mapRef,
+            date: date
+          };
+        }
+      }
+    }
+
+    return null; // Not found
+  } catch (e) {
+    throw new Error('Error searching for match: ' + (e.message || String(e)));
+  }
+}
+
+/**
+ * Back-process a match without requiring a map hint.
+ *
+ * @param {string} secret - Authentication secret
+ * @param {string} division - Division name (Bronze/Silver/Gold)
+ * @param {string} homeTeam - Home team name
+ * @param {string} awayTeam - Away team name
+ * @param {string} whenText - Schedule time text (e.g., "9:00 PM ET")
+ * @param {number} epochSec - Optional epoch timestamp
+ * @returns {Object} Result with match location and update status
+ */
+function server_backprocessMatch(secret, division, homeTeam, awayTeam, whenText, epochSec) {
+  try {
+    _checkSecret_(secret);
+
+    // Validate inputs
+    if (!division || !homeTeam || !awayTeam) {
+      throw new Error('Missing required fields: division, homeTeam, awayTeam');
+    }
+
+    // Resolve team aliases
+    var home = (typeof resolveTeamAlias_ === 'function')
+      ? resolveTeamAlias_(homeTeam)
+      : homeTeam;
+    var away = (typeof resolveTeamAlias_ === 'function')
+      ? resolveTeamAlias_(awayTeam)
+      : awayTeam;
+
+    // Find the match in the sheets
+    var match = _findMatchAcrossAllWeeks_(division, home, away);
+
+    if (!match) {
+      return _err_('Match not found in any week: ' + home + ' vs ' + away + ' in ' + division);
+    }
+
+    // Build the update pair
+    var pair = {
+      division: division,
+      home: home,
+      away: away,
+      whenText: whenText || 'TBD',
+      weekKey: match.weekKey
+    };
+
+    if (epochSec) {
+      pair.epochSec = parseInt(epochSec, 10);
+    }
+
+    // Update the match using existing update logic
+    var updateResult = null;
+    if (typeof updateTablesMessageFromPairs_ === 'function') {
+      updateResult = updateTablesMessageFromPairs_(match.weekKey, [pair]);
+    }
+
+    // Log the back-process action
+    if (typeof logMatchToWMLog_ === 'function') {
+      logMatchToWMLog_(pair, 'backprocess', 'backprocess', false, false);
+    }
+
+    if (typeof sendLog_ === 'function') {
+      sendLog_('✅ Back-processed: ' + division + ' • ' + match.map + ' • ' + home + ' vs ' + away + ' • ' + (whenText || 'TBD'));
+    }
+
+    return _ok_({
+      found: true,
+      match: {
+        weekKey: match.weekKey,
+        map: match.map,
+        date: match.date,
+        blockTop: match.blockTop,
+        row: match.row
+      },
+      pair: pair,
+      updateResult: updateResult
+    });
+
   } catch (e) {
     return _err_(e);
   }

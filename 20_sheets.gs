@@ -6,17 +6,15 @@
 // Used by: 30_relay.gs, 50_rendering.gs, 60_parser.gs, 70_updates.gs
 //
 // Functions in this module:
-// - _gridMeta_()
-// - getSheetByName_(sheetName)
-// - getGeneralSheet_()
-// - getAllMapsList_()
-// - _parseSheetDateET_(s)
-// - _formatWeekRangeET_(d)
-// - _findActiveIndexByDate_(sheet)
-// - _blockTopForIndex_(idx)
-// - weekKey_(week)
-// - getAllBlocks_(sh)
-// - resolveDivisionBlockTop_(division, week)
+// - gridMeta()
+// - getAllMapsList()
+// - parseSheetDateET(s)
+// - formatWeekRangeET(d)
+// - findActiveIndexByDate(sheet)
+// - blockTopForIndex(idx)
+// - weekKey(week)
+// - getAllBlocks(sh)
+// - resolveDivisionBlockTop(division, week)
 // - blockIndexForTop_(sheet, topRow)
 // - _readA_(sheet, row)
 // - getAlignedUpcomingWeekOrReport_()
@@ -25,11 +23,11 @@
 // - getMatchesForDivisionWeek_(division, top)
 // - getMakeupMatchesAllDivs_(week)
 //
-// Total: 18 functions
+// Total: 17 functions
 // =======================
 
 // Where things live:
-function _gridMeta_() {
+function gridMeta() {
   return {
     firstLabelRow: 27,   // A27, A38, A49, ...
     firstMapRow: 28,   // A28, A39, A50, ...
@@ -39,23 +37,9 @@ function _gridMeta_() {
   };
 }
 
-/** Returns a sheet by name from the configured spreadsheet. */
-function getSheetByName_(sheetName) {
-  if (!SPREADSHEET_ID) {
-    throw new Error('SPREADSHEET_ID not configured in Script Properties');
-  }
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  return ss.getSheetByName(sheetName);
-}
-
-/** Returns the "General" sheet (change name here if yours differs). */
-function getGeneralSheet_() {
-  return getSheetByName_('General');
-}
-
 /** Load all canonical maps from General!J2:J (non-blank). */
-function getAllMapsList_() {
-  var sh = getGeneralSheet_();
+function getAllMapsList() {
+  var sh = getSheetByName('General');
   if (!sh) return [];
   var max = sh.getMaxRows();
   if (max < 2) return [];
@@ -68,7 +52,7 @@ function getAllMapsList_() {
   return out;
 }
 
-function _parseSheetDateET_(s) {
+function parseSheetDateET(s) {
   s = String(s || '').trim();
   if (!s) return null;
   var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?$/);
@@ -79,7 +63,7 @@ function _parseSheetDateET_(s) {
   var d = new Date(iso + 'T00:00:00-04:00'); return isNaN(d.getTime()) ? null : d;
 }
 
-function _formatWeekRangeET_(d) {
+function formatWeekRangeET(d) {
   var tz = 'America/New_York', t = new Date(d.getTime());
   var dow = (+Utilities.formatDate(t, tz, 'u')); // 1..7 (Mon..Sun)
   var start = new Date(t.getTime()); start.setDate(start.getDate() - (dow - 1));
@@ -89,8 +73,8 @@ function _formatWeekRangeET_(d) {
   return (lm === rm) ? (left + '–' + Utilities.formatDate(end, tz, 'MMM d')) : (left + '–' + right);
 }
 
-function _findActiveIndexByDate_(sheet) {
-  var G = _gridMeta_(), tz = 'America/New_York';
+function findActiveIndexByDate(sheet) {
+  var G = gridMeta(), tz = 'America/New_York';
   var todayEt = new Date(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd') + 'T00:00:00-04:00');
   var i = 0, lastGood = -1;
   while (i < 200) {
@@ -98,7 +82,7 @@ function _findActiveIndexByDate_(sheet) {
     if (dateRow > sheet.getMaxRows()) break;
     var s = sheet.getRange(dateRow, 1).getDisplayValue().trim();
     if (!s) { i++; continue; }
-    var d = _parseSheetDateET_(s);
+    var d = parseSheetDateET(s);
     if (d) { lastGood = i; if (d.getTime() >= todayEt.getTime()) return i; }
     i++;
   }
@@ -106,12 +90,12 @@ function _findActiveIndexByDate_(sheet) {
 }
 
 // Top is the header row (A27, A38, A49, ...)
-function _blockTopForIndex_(idx) {
-  var G = _gridMeta_();
+function blockTopForIndex(idx) {
+  var G = gridMeta();
   return G.firstLabelRow + (idx | 0) * G.stride;  // 27 + k*11
 }
 
-function weekKey_(week) {
+function weekKey(week) {
   var tz = 'America/New_York';
   var d = (week && week.date instanceof Date) ? week.date : (week && week.date ? new Date(week.date) : null);
   var iso = d && !isNaN(d.getTime()) ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : '';
@@ -120,7 +104,7 @@ function weekKey_(week) {
 }
 
 /** Get all weekly blocks for a division sheet (array of block meta objects). */
-function getAllBlocks_(sh) {
+function getAllBlocks(sh) {
   const blocks = [];
   let row = GRID.startRow;
   while (true) {
@@ -133,7 +117,7 @@ function getAllBlocks_(sh) {
     blocks.push({
       top: row,
       map: map,
-      mapLower: normalizeMap_(map),
+      mapLower: normalizeMap(map),
       weekDate: weekDate,
       weekName: headerWeekName
     });
@@ -150,12 +134,12 @@ function getAllBlocks_(sh) {
  *      - map + date match (score 3)
  *      - map-only match   (score 2)
  *      - date-only match  (score 1)
- *   3) Fallback to _findActiveIndexByDate_(sheet)
+ *   3) Fallback to findActiveIndexByDate(sheet)
  *
  * Returns: integer top row (>=1) or 0 if not found.
  */
 // Honor the hint first; otherwise find by map/date; otherwise fall back to active index.
-function resolveDivisionBlockTop_(division, week) {
+function resolveDivisionBlockTop(division, week) {
   // 0) honor hint
   try {
     var hinted = week && week.blocks && week.blocks[division] && week.blocks[division].top;
@@ -165,10 +149,10 @@ function resolveDivisionBlockTop_(division, week) {
   // 1) scan this division for best match (map+date → map-only → date-only)
   var sh = getSheetByName_(division);
   if (!sh) return 0;
-  var G = _gridMeta_();
+  var G = gridMeta();
   function norm(s) { return String(s || '').trim().toLowerCase(); }
   function toIso(d) { return Utilities.formatDate(d, 'America/New_York', 'yyyy-MM-dd'); }
-  function parseDate(s) { return _parseSheetDateET_ ? _parseSheetDateET_(s) : new Date(s); }
+  function parseDate(s) { return parseSheetDateET ? parseSheetDateET(s) : new Date(s); }
 
   var tgtMap = norm(week && week.mapRef);
   var tgtDate = (week && week.date) ? (week.date instanceof Date ? week.date : new Date(week.date)) : null;
@@ -200,19 +184,19 @@ function resolveDivisionBlockTop_(division, week) {
       }
     }
   }
-  if (bestIdx >= 0) return _blockTopForIndex_(bestIdx);
+  if (bestIdx >= 0) return blockTopForIndex(bestIdx);
 
   // 2) fallback to active-by-date
-  if (typeof _findActiveIndexByDate_ === 'function') {
-    var idx = _findActiveIndexByDate_(sh);
-    return _blockTopForIndex_(idx);
+  if (typeof findActiveIndexByDate === 'function') {
+    var idx = findActiveIndexByDate(sh);
+    return blockTopForIndex(idx);
   }
   return 0;
 }
 
 /** Determine the block index (0-based) for the block starting at `topRow` in `sheet`. */
 function blockIndexForTop_(sheet, topRow) {
-  const blocks = getAllBlocks_(sheet) || [];
+  const blocks = getAllBlocks(sheet) || [];
   if (!blocks.length) return 0;
   let idx = 0;
   for (let i = 0; i < blocks.length; i++) {
@@ -237,27 +221,27 @@ function _readA_(sheet, row) {
 }
 
 function getAlignedUpcomingWeekOrReport_() {
-  var G = _gridMeta_(); var gold = getSheetByName('Gold');
+  var G = gridMeta(); var gold = getSheetByName('Gold');
   if (!gold) throw new Error('Sheet "Bronze" not found');
-  var idx = _findActiveIndexByDate_(gold);
+  var idx = findActiveIndexByDate(gold);
 
   var mapRef = gold.getRange(G.firstMapRow + idx * G.stride, 1).getDisplayValue().trim();
   var dateTx = gold.getRange(G.firstDateRow + idx * G.stride, 1).getDisplayValue().trim();
   var label = gold.getRange(G.firstLabelRow + idx * G.stride, 1).getDisplayValue().trim();
-  var date = _parseSheetDateET_(dateTx);
+  var date = parseSheetDateET(dateTx);
   if (!date) throw new Error('Could not parse default date at A' + (G.firstDateRow + idx * G.stride) + ' on Gold');
 
-  var divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze', 'Silver', 'Gold'];
-  var blocks = {}; for (var i = 0; i < divs.length; i++) blocks[divs[i]] = { top: _blockTopForIndex_(idx) };
+  var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
+  var blocks = {}; for (var i = 0; i < divs.length; i++) blocks[divs[i]] = { top: blockTopForIndex(idx) };
 
   var week = {
     date: date,
     mapRef: mapRef || '',
     seasonWeekTitle: label || '',
-    range: _formatWeekRangeET_(date),
+    range: formatWeekRangeET(date),
     blocks: blocks
   };
-  week.weekKey = weekKey_(week);
+  week.weekKey = weekKey(week);
   return week;
 }
 
@@ -271,10 +255,10 @@ function deriveWeekMetaFromDivisionTop_(division, top) {
   var mapRef = String(sh.getRange(top + 1, 1).getDisplayValue() || '').trim(); // A(top+1)
   var dateTx = String(sh.getRange(top + 2, 1).getDisplayValue() || '').trim(); // A(top+2)
 
-  var date = (typeof _parseSheetDateET_ === 'function') ? _parseSheetDateET_(dateTx) : new Date(dateTx);
+  var date = (typeof parseSheetDateET === 'function') ? parseSheetDateET(dateTx) : new Date(dateTx);
   if (date && isNaN(date.getTime())) date = null;
 
-  var range = date ? _formatWeekRangeET_(date) : '';
+  var range = date ? formatWeekRangeET(date) : '';
   var epochSec = null;
   if (date) {
     var dEt = Utilities.formatDate(date, tz, 'yyyy-MM-dd');
@@ -292,10 +276,10 @@ function deriveWeekMetaFromDivisionTop_(division, top) {
  */
 function syncHeaderMetaToTables_(week, canonicalDivision) {
   week = week || {};
-  var divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze', 'Silver', 'Gold'];
+  var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var canon = canonicalDivision || divs[0] || 'Bronze';
 
-  var top = (typeof resolveDivisionBlockTop_ === 'function') ? resolveDivisionBlockTop_(canon, week) : 0;
+  var top = (typeof resolveDivisionBlockTop === 'function') ? resolveDivisionBlockTop(canon, week) : 0;
   if (!top) return week; // nothing to do
 
   var meta = deriveWeekMetaFromDivisionTop_(canon, top);
@@ -312,7 +296,7 @@ function syncHeaderMetaToTables_(week, canonicalDivision) {
   for (var i = 0; i < divs.length; i++) week.blocks[divs[i]] = { top: top };
 
   // refresh weekKey now that meta is in sync
-  if (typeof weekKey_ === 'function') week.weekKey = weekKey_(week);
+  if (typeof weekKey === 'function') week.weekKey = weekKey(week);
   return week;
 }
 /**
@@ -329,8 +313,6 @@ function getMatchesForDivisionWeek_(division, top) {
   var firstGridRow = top + 1;         // <-- IMPORTANT: start one row below header
   var rows = 10;                      // matches per block
   var band = sh.getRange(firstGridRow, 2, rows, 7).getDisplayValues(); // B..H
-
-  function isBye(s) { return /^\s*BYE\s*$/i.test(String(s || '')); }
 
   var out = [];
   for (var i = 0; i < band.length; i++) {
@@ -377,7 +359,7 @@ function getMakeupMatchesAllDivs_(week) {
   var tz = 'America/New_York';
 
   // Grid constants for your sheet
-  var G = (typeof _gridMeta_ === 'function') ? _gridMeta_() : {
+  var G = (typeof gridMeta === 'function') ? gridMeta() : {
     firstLabelRow: 27,   // A27, A38, A49, ...
     firstMapRow: 28,   // A28, A39, A50, ...
     firstDateRow: 29,   // A29, A40, A51, ...
@@ -388,8 +370,8 @@ function getMakeupMatchesAllDivs_(week) {
   // Midnight "today" in ET — blocks < today are eligible as make-ups
   var todayEt = new Date(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd') + 'T00:00:00-04:00');
 
-  var divisions = (typeof getDivisionSheets_ === 'function')
-    ? getDivisionSheets_()
+  var divisions = (typeof getDivisionSheets === 'function')
+    ? getDivisionSheets()
     : ['Bronze', 'Silver', 'Gold'];
 
   var out = [];
@@ -405,7 +387,7 @@ function getMakeupMatchesAllDivs_(week) {
     return /^(W|L|T|FF|F|FORFEIT)$/.test(t);
   }
   function parseEtDate(s) {
-    if (typeof _parseSheetDateET_ === 'function') return _parseSheetDateET_(s);
+    if (typeof parseSheetDateET === 'function') return parseSheetDateET(s);
     var d = new Date(s);
     return isNaN(d.getTime()) ? null : d;
   }

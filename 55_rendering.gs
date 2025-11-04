@@ -36,7 +36,7 @@ function upsertWeeklyDiscordMessage_(week) {
   }
 
   // Compute wkKey
-  var wkKey = (typeof weekKey_ === 'function') ? weekKey_(week) : String(week.weekKey || '');
+  var wkKey = (typeof weekKey === 'function') ? weekKey(week) : String(week.weekKey || '');
   if (!wkKey) {
     var dIso = Utilities.formatDate(week.date, 'America/New_York', 'yyyy-MM-dd');
     var mRef = String(week.mapRef || '').trim();
@@ -47,7 +47,7 @@ function upsertWeeklyDiscordMessage_(week) {
     (typeof WEEKLY_POST_CHANNEL_ID !== 'undefined' ? WEEKLY_POST_CHANNEL_ID : '');
   if (!channelId) throw new Error('WEEKLY_POST_CHANNEL_ID missing');
 
-  var store = (typeof loadWeekStore_ === 'function') ? loadWeekStore_(wkKey) : null;
+  var store = (typeof loadWeekStore === 'function') ? loadWeekStore(wkKey) : null;
   var header = (typeof renderHeaderEmbedPayload_ === 'function') ? renderHeaderEmbedPayload_(week) : { embeds: [] };
 
   // ======== build Weekly Tables body (prefer your working functions) ========
@@ -55,17 +55,17 @@ function upsertWeeklyDiscordMessage_(week) {
   if (typeof renderWeeklyTablesBody_ === 'function') {
     // your preferred "worked last" implementation
     var body = renderWeeklyTablesBody_(week, store);
-    weeklyBody = body ? ensureFence_((body)) : '';
+    weeklyBody = body ? ensureFence((body)) : '';
   } else if (typeof renderTablesPages_ === 'function') {
     // fallback: join pages into ONE message
     var pages = renderTablesPages_(week, store) || [];
     var joined = (Array.isArray(pages) ? pages : [String(pages || '')]).filter(Boolean).join('\n\n');
-    weeklyBody = joined ? ensureFence_(joined) : '';
+    weeklyBody = joined ? ensureFence(joined) : '';
   } else {
     // last-resort: try existing split renderer (if present)
     if (typeof renderCurrentWeekTablesSplit_ === 'function') {
       var split = renderCurrentWeekTablesSplit_(week) || [];
-      weeklyBody = split.length ? ensureFence_(split.filter(Boolean).join('\n\n')) : '';
+      weeklyBody = split.length ? ensureFence(split.filter(Boolean).join('\n\n')) : '';
     }
   }
 
@@ -73,16 +73,16 @@ function upsertWeeklyDiscordMessage_(week) {
   var remBody = '';
   if (typeof renderRematchesTableBody_ === 'function') {
     remBody = String(renderRematchesTableBody_(week) || '');
-    remBody = stripFence_(remBody.trim());
+    remBody = stripFence(remBody.trim());
   }
 
-  var ids = _loadMsgIds_(wkKey);  // expects {header, table, rematch, tables[], rematches[]}
+  var ids = loadMsgIds(wkKey);  // expects {header, table, rematch, tables[], rematches[]}
 
   // Hashes
-  var headerHash = _safeHeaderHash_(header);
-  var weeklyHash = weeklyBody ? ((typeof sha256Hex_ === 'function') ? sha256Hex_(weeklyBody) : weeklyBody.length) : '';
+  var headerHash = safeHeaderHash(header);
+  var weeklyHash = weeklyBody ? ((typeof sha256Hex === 'function') ? sha256Hex(weeklyBody) : weeklyBody.length) : '';
   // var remHashSig = remBody ? ('REM\n' + remBody) : '';
-  var remHash = remBody ? ((typeof sha256Hex_ === 'function') ? sha256Hex_(remBody) : remBody.length) : '';
+  var remHash = remBody ? ((typeof sha256Hex === 'function') ? sha256Hex(remBody) : remBody.length) : '';
 
   // Prior hashes
   var mainKey = 'WEEKLY_MSG_HASHES::' + wkKey;
@@ -161,7 +161,7 @@ function upsertWeeklyDiscordMessage_(week) {
   ids.header = ids.header ? [ids.header] : [];
   ids.tables = ids.table ? [ids.table] : [];
   ids.rematches = ids.rematch ? [ids.rematch] : [];
-  _saveMsgIds_(wkKey, ids);
+  saveMsgIds(wkKey, ids);
   PropertiesService.getScriptProperties().setProperty(mainKey, JSON.stringify({
     header: headerHash,
     table: weeklyHash,
@@ -198,11 +198,11 @@ function upsertWeeklyDiscordMessage_(week) {
   })();
 
   // Build and send the notice
-  var notice = formatWeeklyNotice_(week, actionWord);
+  var notice = formatWeeklyNotice(week, actionWord);
   try { sendLog_(notice); } catch (_) { }
 
   try {
-    logLocal_('INFO', 'weekly.board.notice', {
+    logLocal('INFO', 'weekly.board.notice', {
       text: notice,
       wkKey: String(wkKey || ''),
       headerId: (ids && ids.header) ? String(ids.header) : null,
@@ -225,7 +225,7 @@ function upsertWeeklyDiscordMessage_(week) {
 }
 
 function renderCurrentWeekTablesSplit_(week, store) {
-  var divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze', 'Silver', 'Gold'];
+  var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var order = ['Bronze', 'Silver', 'Gold'].filter(function (d) { return divs.indexOf(d) !== -1; });
   var parts = [];
   for (var i = 0; i < order.length; i++) {
@@ -236,8 +236,8 @@ function renderCurrentWeekTablesSplit_(week, store) {
 }
 
 function renderDivisionCurrentTable_(division, week, store, mapName) {
-  var W = getTableWidths_();
-  var header = formatVsHeader_(W.COL1) + ' | ' + padR_('Scheduled', W.COL2) + ' | ' + padR_('Shoutcaster', W.COL3);
+  var W = getTableWidths();
+  var header = formatVsHeader(W.COL1) + ' | ' + padRight('Scheduled', W.COL2) + ' | ' + padRight('Shoutcaster', W.COL3);
   var sep = Array(header.length + 1).join('-');
 
   var rendered = _renderDivisionTableSafely_(division, week, store);
@@ -257,8 +257,8 @@ function renderDivisionCurrentTable_(division, week, store, mapName) {
     var home = m ? m[1].trim() : vsText;
     var away = m ? m[2].trim() : '';
 
-    var vsCell = formatVsCell_(home, away, W.COL1);
-    var row = vsCell + ' | ' + padR_(sched, W.COL2) + ' | ' + padR_(cast, W.COL3);
+    var vsCell = formatVsCell(home, away, W.COL1);
+    var row = vsCell + ' | ' + padRight(sched, W.COL2) + ' | ' + padRight(cast, W.COL3);
     outRows.push(row);
   }
 
@@ -299,7 +299,7 @@ function _extractTableRows_(rendered) {
 
 /** Render the weekly header embed payload for a given `week` object. */
 function renderHeaderEmbedPayload_(week) {
-  var tz = week.tz || getTz_();
+  var tz = week.tz || getTimezone();
   var wkKey = String(week.weekKey || '');
   var mapRef = String(week.mapRef || '');
   var season = String(week.seasonWeek || '');
@@ -312,7 +312,7 @@ function renderHeaderEmbedPayload_(week) {
     var dt = new Date(keyDate + 'T21:00:00');  // <-- no TZ suffix here
     if (!isNaN(dt.getTime())) epoch = Math.floor(dt.getTime() / 1000);
   }
-  var seasonInfo = getSeasonInfo_();
+  var seasonInfo = getSeasonInfo();
   var title = String(seasonInfo || '') + ' Weekly Matches';
   if (season) title += ' — ' + season;
   else if (label) title += ' — ' + label;
@@ -344,14 +344,14 @@ function renderHeaderEmbedPayload_(week) {
 function renderTablesPages_(week, store) {
   var chunks = [];
 
-  var divs = (typeof getDivisionSheets_ === 'function')
-    ? getDivisionSheets_()
+  var divs = (typeof getDivisionSheets === 'function')
+    ? getDivisionSheets()
     : ['Bronze', 'Silver', 'Gold'];
 
   // Current-week tables (one per division)
   for (var i = 0; i < divs.length; i++) {
     var div = divs[i];
-    var top = (typeof resolveDivisionBlockTop_ === 'function') ? resolveDivisionBlockTop_(div, week) : 0;
+    var top = (typeof resolveDivisionBlockTop === 'function') ? resolveDivisionBlockTop(div, week) : 0;
     if (!top) continue;
 
     var matches = (typeof getMatchesForDivisionWeek_ === 'function') ? getMatchesForDivisionWeek_(div, top) : [];
@@ -389,8 +389,8 @@ function renderDivisionWeekTable_(division, week) {
   var sh = getSheetByName(division);
   if (!sh) return '';
 
-  var G = _gridMeta_();
-  var top = resolveDivisionBlockTop_(division, week);
+  var G = gridMeta();
+  var top = resolveDivisionBlockTop(division, week);
   if (!top) return '';
 
   // Grid band for this block
@@ -402,17 +402,17 @@ function renderDivisionWeekTable_(division, week) {
   var band = sh.getRange(firstMatchRow, 1, numRows, numCols).getDisplayValues();
 
   // Required helpers for your formatting
-  if (typeof getTableWidths_ !== 'function' ||
-    typeof formatVsHeader_ !== 'function' ||
-    typeof padC_ !== 'function' ||
-    typeof padL_ !== 'function' ||
-    typeof padR_ !== 'function') {
+  if (typeof getTableWidths !== 'function' ||
+    typeof formatVsHeader !== 'function' ||
+    typeof padCenter !== 'function' ||
+    typeof padLeft !== 'function' ||
+    typeof padRight !== 'function') {
     return '';
   }
 
-  var W = getTableWidths_();
-  var header = formatVsHeader_(W.COL1) + ' | ' + padC_('Scheduled', W.COL2) + ' | ' + padC_('Shoutcaster', W.COL3);
-  var sep = repeat_('-', header.length);
+  var W = getTableWidths();
+  var header = formatVsHeader(W.COL1) + ' | ' + padCenter('Scheduled', W.COL2) + ' | ' + padCenter('Shoutcaster', W.COL3);
+  var sep = repeat('-', header.length);
 
   var rows = [];
   for (var i = 0; i < band.length; i++) {
@@ -422,11 +422,11 @@ function renderDivisionWeekTable_(division, week) {
     if (!home && !away) continue;
     if (/^\s*BYE\s*$/i.test(home) || /^\s*BYE\s*$/i.test(away)) continue;
 
-    var vs = (typeof formatVsRow_ === 'function')
-      ? formatVsRow_(home, away, W.COL1)
-      : padR_(home, Math.floor((W.COL1 - 3) / 2)) + ' vs ' + padL_(away, Math.ceil((W.COL1 - 3) / 2));
+    var vs = (typeof formatVsRow === 'function')
+      ? formatVsRow(home, away, W.COL1)
+      : padRight(home, Math.floor((W.COL1 - 3) / 2)) + ' vs ' + padLeft(away, Math.ceil((W.COL1 - 3) / 2));
 
-    rows.push(vs + ' | ' + padC_('TBD', W.COL2) + ' | ' + padC_('-', W.COL3));
+    rows.push(vs + ' | ' + padCenter('TBD', W.COL2) + ' | ' + padCenter('-', W.COL3));
   }
   if (!rows.length) return '';
 
@@ -440,12 +440,12 @@ function renderDivisionWeekTable_(division, week) {
  * Expects renderDivisionWeekTablePretty_(division, matches, label) to return a fenced block.
  */
 function renderWeeklyTablesBody_(week) {
-  var divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze', 'Silver', 'Gold'];
+  var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var chunks = [];
 
   for (var i = 0; i < divs.length; i++) {
     var div = divs[i];
-    var top = (typeof resolveDivisionBlockTop_ === 'function') ? resolveDivisionBlockTop_(div, week) : 0;
+    var top = (typeof resolveDivisionBlockTop === 'function') ? resolveDivisionBlockTop(div, week) : 0;
     if (!top) continue;
 
     var matches = (typeof getMatchesForDivisionWeek_ === 'function') ? getMatchesForDivisionWeek_(div, top) : [];
@@ -472,21 +472,21 @@ function renderRematchesTableBody_() {
   if (!makeups.length) return '';
 
   // Required helpers/widths used by your weekly tables
-  if (typeof getTableWidths_ !== 'function' || typeof padC_ !== 'function') return '';
-  var W = getTableWidths_();
+  if (typeof getTableWidths !== 'function' || typeof padCenter !== 'function') return '';
+  var W = getTableWidths();
 
   // Header line (exactly like weekly)
-  var hdr = (typeof formatVsHeader_ === 'function')
-    ? formatVsHeader_(W.COL1)
-    : padC_('Home  vs  Away', W.COL1);
-  hdr = hdr + ' | ' + padC_('Scheduled', W.COL2) + ' | ' + padC_('Shoutcaster', W.COL3);
+  var hdr = (typeof formatVsHeader === 'function')
+    ? formatVsHeader(W.COL1)
+    : padCenter('Home  vs  Away', W.COL1);
+  hdr = hdr + ' | ' + padCenter('Scheduled', W.COL2) + ' | ' + padCenter('Shoutcaster', W.COL3);
 
   var fullLen = hdr.length;
-  var sep = (typeof repeat_ === 'function') ? repeat_('-', fullLen) : new Array(fullLen + 1).join('-');
+  var sep = (typeof repeat === 'function') ? repeat('-', fullLen) : new Array(fullLen + 1).join('-');
 
   // Center a banner label around the FIRST '|' divider (between COL1 and COL2)
   function centerAtDivider(label) {
-    var rep = (typeof repeat_ === 'function') ? repeat_ : function (s, n) { return new Array(n + 1).join(s); };
+    var rep = (typeof repeat === 'function') ? repeat : function (s, n) { return new Array(n + 1).join(s); };
     label = ' ' + String(label || '').trim() + ' ';
     var L = Math.min(label.length, fullLen);
 
@@ -502,11 +502,11 @@ function renderRematchesTableBody_() {
 
   // vs cell identical to weekly tables
   function vsCell(home, away) {
-    if (typeof formatVsRow_ === 'function') return formatVsRow_(home, away, W.COL1);
+    if (typeof formatVsRow === 'function') return formatVsRow(home, away, W.COL1);
     var leftW = Math.floor((W.COL1 - 3) / 2);
     var rightW = W.COL1 - 3 - leftW;
-    var l = (typeof padR_ === 'function') ? padR_(home, leftW) : String(home || '').padEnd(leftW, ' ');
-    var r = (typeof padL_ === 'function') ? padL_(away, rightW) : String(away || '').padStart(rightW, ' ');
+    var l = (typeof padRight === 'function') ? padRight(home, leftW) : String(home || '').padEnd(leftW, ' ');
+    var r = (typeof padLeft === 'function') ? padLeft(away, rightW) : String(away || '').padStart(rightW, ' ');
     return l + ' vs ' + r;
   }
 
@@ -547,7 +547,7 @@ function renderRematchesTableBody_() {
       out.push(centerAtDivider(div)); // division banner centered on the divider
     }*/
 
-    var row = vsCell(it.home, it.away) + ' | ' + padC_('TBD', W.COL2) + ' | ' + padC_('-', W.COL3);
+    var row = vsCell(it.home, it.away) + ' | ' + padCenter('TBD', W.COL2) + ' | ' + padCenter('-', W.COL3);
     out.push(row);
   }
 

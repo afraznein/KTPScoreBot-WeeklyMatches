@@ -160,7 +160,7 @@ function contentFromRelay_(payload) {
   if (payload == null) return '';
 
   // Fast path: already a string
-  if (typeof payload === 'string') return normalizeWhitespace_(payload);
+  if (typeof payload === 'string') return normalizeWhitespace(payload);
 
   // Try common wrappers
   var msg = payload;
@@ -175,13 +175,13 @@ function contentFromRelay_(payload) {
   }
 
   // 2) Embeds (title/description/fields) if no or minimal content
-  if ((!parts.length || isJustPings_(parts.join(' '))) && Array.isArray(msg.embeds) && msg.embeds.length) {
+  if ((!parts.length || isJustPings(parts.join(' '))) && Array.isArray(msg.embeds) && msg.embeds.length) {
     parts.push(_textFromEmbeds_(msg.embeds));
   }
 
   // 3) Referenced (reply) message content, if present
   var ref = msg.referenced_message || (msg.message && msg.message.referenced_message);
-  if ((!parts.length || isJustPings_(parts.join(' '))) && ref && typeof ref.content === 'string') {
+  if ((!parts.length || isJustPings(parts.join(' '))) && ref && typeof ref.content === 'string') {
     parts.push(ref.content);
   }
 
@@ -199,14 +199,14 @@ function contentFromRelay_(payload) {
   }
 
   // 6) Final normalize
-  var text = normalizeWhitespace_(parts.filter(Boolean).join('\n').trim());
+  var text = normalizeWhitespace(parts.filter(Boolean).join('\n').trim());
 
   // Strip common noise that often slips through relays; keep it *light*
   text = text.replace(/<[@#][!&]?\d+>/g, ' ')      // <@123>, <@!123>, <#123>, <@&role>
     .replace(/<:[a-z0-9_]+:\d+>/gi, ' ')  // <:emoji:12345>
     .replace(/:[a-z0-9_]+:/gi, ' ');      // :emoji:
 
-  return normalizeWhitespace_(text);
+  return normalizeWhitespace(text);
 }
 
 /* ----------------------- helpers ----------------------- */
@@ -252,7 +252,7 @@ function _fetchSingleMessageInclusive_(channelId, messageId) {
 
   // 3) Last resort: fetch "after = (messageId - 1)" using string arithmetic
   try {
-    var prev = decStringMinusOne_(String(messageId));
+    var prev = decStringMinusOne(String(messageId));
     if (prev) {
       var maybe = fetchChannelMessages_(channelId, { after: prev, limit: 1 }) || [];
       for (var j = 0; j < maybe.length; j++) {
@@ -290,7 +290,7 @@ function postChannelMessage_(channelId, content) {
   var payload = { channelId: String(channelId), content: String(content || '') };
   var res = relayFetch_(path, { method: 'post', payload: payload }) || {};
   var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
-  if (!id) try { logLocal_('WARN', 'postChannelMessage_ no id', { res: res }); } catch (_) { }
+  if (!id) try { logLocal('WARN', 'postChannelMessage_ no id', { res: res }); } catch (_) { }
   return id;
 }
 
@@ -300,7 +300,7 @@ function postChannelMessageAdvanced_(channelId, content, embeds) {
   var payload = { channelId: String(channelId), content: String(content || ''), embeds: embeds || [] };
   var res = relayFetch_(path, { method: 'post', payload: payload }) || {};
   var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
-  if (!id) try { logLocal_('WARN', 'postChannelMessageAdvanced_ no id', { res: res }); } catch (_) { }
+  if (!id) try { logLocal('WARN', 'postChannelMessageAdvanced_ no id', { res: res }); } catch (_) { }
   return id;
 }
 

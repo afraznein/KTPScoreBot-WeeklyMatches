@@ -13,14 +13,14 @@
 // =======================
 
 function _saveTwitchForUser_(userId, twitchUrl) {
-  const key = 'TWITCH_URL__' + String(userId);
+  const key = 'TWITCH_URL' + String(userId);
   _props_().setProperty(key, String(twitchUrl));
 }
 
 function server_getTwitchUrl(secret, userId) {
   try {
     _checkSecret_(secret);
-    const key = 'TWITCH_URL__' + String(userId);
+    const key = 'TWITCH_URL' + String(userId);
     const url = _props_().getProperty(key) || '';
     return _ok_({ userId: String(userId), twitchUrl: url });
   } catch (e) {

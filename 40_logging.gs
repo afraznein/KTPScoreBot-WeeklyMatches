@@ -15,27 +15,51 @@
 // Total: 5 functions
 // =======================
 
-/** Send a brief log message to the results log channel (if configured). */
-function sendLog_(msg) {
+// ----- LOGGING -----
+
+/** Append a log entry (timestamped) to console and optionally to Discord log channel. */
+function logLocal(level, event, data) {
   try {
-    if (RESULTS_LOG_CHANNEL_ID) {
+    const ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    const line = `[${level}] ${ts} ${event} ${data ? JSON.stringify(data) : ''}`;
+    console.log(line);
+  } catch (e) {
+    // If console logging fails for any reason, do nothing.
+  }
+}
+
+/** Send a brief log message to the results log channel (if configured) and write to sheet. */
+function sendLog(msg) {
+  // Send to Discord log channel
+  try {
+    if (typeof postChannelMessage_ === 'function' && RESULTS_LOG_CHANNEL_ID) {
       postChannelMessage_(RESULTS_LOG_CHANNEL_ID, msg);
     }
-    logLocal_('INFO', LOG_SHEET, { msg: msg });
   } catch (e) {
-    logLocal_('WARN', 'sendLog_ failed', { error: String(e) });
+    console.error('sendLog_ Discord post failed:', e);
   }
+
+  // Write to WM_Log sheet
   try {
+    if (!SPREADSHEET_ID) {
+      console.error('sendLog_: SPREADSHEET_ID not configured');
+      return;
+    }
+
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let sh = ss.getSheetByName(LOG_SHEET);
+
     if (!sh) {
-      sh = ss.insertSheet('WM_LOG');
-      sh.hideSheet();
-      sh.appendRow([`Timestamp`,`Level`,`Event`,`Message`,`Details (JSON)`]);
+      sh = ss.insertSheet(LOG_SHEET);
+      sh.appendRow(['Timestamp', 'Level', 'Message']);
       sh.setFrozenRows(1);
     }
-    sh.appendRow([new Date(), level, msg, data ? JSON.stringify(data).slice(0,50000) : '']);
-  } catch (_){}
+
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    sh.appendRow([timestamp, 'INFO', String(msg)]);
+  } catch (e) {
+    console.error('sendLog_ sheet write failed:', e);
+  }
 }
 
 function formatScheduleConfirmationLine_(parsed, row, authorId, msgId) {
@@ -61,39 +85,58 @@ function logParsingSummary_(successCount, tentativeCount, sourceChannel) {
 }
 
 function logMatchToWMLog_(entry, authorId, sourceChannel, isTentative, isRematch) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = ss.getSheetByName('WM_Log');
-  if (!sheet) return;
+  try {
+    if (!SPREADSHEET_ID) return;
 
-  const map = entry.map || '';
-  const date = entry.whenText || '';
-  const teams = `${entry.team1} vs ${entry.team2}`;
-  const div = entry.division || '';
-  const status = isTentative ? 'Confirming' : (isRematch ? 'Rematch' : 'Scheduled');
-  const rowBit = entry.row ? `Row ${entry.row}` : '';
-  const authorBit = authorId ? ` by <@${authorId}>` : '';
-  const channelBit = sourceChannel ? `from #${sourceChannel}` : '';
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet = ss.getSheetByName('WM_Log');
 
-  const message = `✅ **${div}** • \`${map}\` • ${teams} • ${date} • ${status} ${rowBit}${authorBit} ${channelBit}`;
-  sendLog_(message);
+    if (!sheet) {
+      sheet = ss.insertSheet('WM_Log');
+      sheet.appendRow(['Timestamp', 'Division', 'Map', 'Teams', 'When', 'Status', 'Row', 'Author', 'Channel']);
+      sheet.setFrozenRows(1);
+    }
+
+    const map = entry.map || '';
+    const date = entry.whenText || '';
+    const teams = `${entry.team1} vs ${entry.team2}`;
+    const div = entry.division || '';
+    const status = isTentative ? 'Confirming' : (isRematch ? 'Rematch' : 'Scheduled');
+    const rowBit = entry.row ? `Row ${entry.row}` : '';
+    const authorBit = authorId ? `@${authorId}` : '';
+    const channelBit = sourceChannel || '';
+
+    const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    sheet.appendRow([timestamp, div, map, teams, date, status, rowBit, authorBit, channelBit]);
+  } catch (e) {
+    console.error('logMatchToWMLog_ failed:', e);
+  }
 }
 
 function logToWmSheet_(level, event, message, detailsObj) {
   try {
+    if (!SPREADSHEET_ID) return;
+
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sh = ss.getSheetByName(LOG_SHEET) || ss.insertSheet(LOG_SHEET);
-    if (sh.getLastRow() === 0) {
+    let sh = ss.getSheetByName(LOG_SHEET);
+
+    if (!sh) {
+      sh = ss.insertSheet(LOG_SHEET);
       sh.appendRow(['Timestamp', 'Level', 'Event', 'Message', 'Details (JSON)']);
-      sh.hideSheet();
+      sh.setFrozenRows(1);
     }
+
+    const tz = (typeof getTimezone === 'function') ? getTimezone() : Session.getScriptTimeZone();
+    const timestamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+
     sh.appendRow([
-      Utilities.formatDate(new Date(), getTz_ ? getTz_() : Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),
+      timestamp,
       String(level || 'INFO'),
       String(event || ''),
       String(message || ''),
       detailsObj ? JSON.stringify(detailsObj) : ''
     ]);
   } catch (e) {
-    // Don't let logging failures break anything
+    console.error('logToWmSheet_ failed:', e);
   }
 }

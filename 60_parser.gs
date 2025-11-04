@@ -39,7 +39,7 @@
 // =======================
 /** Build alias→canon map from the General sheet list. Cached per execution. */
 function _getMapAliasCatalog_() {
-  var canonList = (typeof getAllMapsList_ === 'function') ? getAllMapsList_() : [];
+  var canonList = (typeof getAllMapsList === 'function') ? getAllMapsList() : [];
   var aliasToCanon = {};
   for (var i = 0; i < canonList.length; i++) {
     var canon = String(canonList[i] || '').trim();
@@ -196,9 +196,9 @@ function _cleanScheduleText_(raw) {
 
 // --- Enhanced Team Alias Resolver ---
 function resolveTeamAlias_(rawInput) {
-  __TEAM_ALIAS_CACHE = null; // Always force reload from sheet
-  __TEAM_INDEX_CACHE = null; // Clear team index cache too
-  const aliasMap = loadTeamAliases_();
+  TEAM_ALIAS_CACHE = null; // Always force reload from sheet
+  TEAM_INDEX_CACHE = null; // Clear team index cache too
+  const aliasMap = loadTeamAliases();
   const upper = String(rawInput || '').trim().toUpperCase();
   return aliasMap[upper] || rawInput;
 }
@@ -206,7 +206,7 @@ function resolveTeamAlias_(rawInput) {
 
 // --- Enhanced _matchTeam_ to use aliases ---
 function _matchTeam_(snippet, forcedDivision) {
-  var idx = (typeof getTeamIndexCached_ === 'function') ? getTeamIndexCached_() : null;
+  var idx = (typeof getTeamIndexCached === 'function') ? getTeamIndexCached() : null;
   if (!idx || !idx.teams || !idx.teams.length) return null;
 
 
@@ -356,8 +356,8 @@ function _parseWhenFlexible_(s, hintDiv, hintMap) {
 /** Build a list of all weeks from all division sheets */
 function _buildWeekListFromSheets_() {
   var weeks = [];
-  var divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze', 'Silver', 'Gold'];
-  var G = _gridMeta_();
+  var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
+  var G = gridMeta();
 
   for (var d = 0; d < divs.length; d++) {
     var divName = divs[d];
@@ -376,7 +376,7 @@ function _buildWeekListFromSheets_() {
 
       if (!mapRef || !dateTx) continue; // No more weeks
 
-      var date = (typeof _parseSheetDateET_ === 'function') ? _parseSheetDateET_(dateTx) : new Date(dateTx);
+      var date = (typeof parseSheetDateET === 'function') ? parseSheetDateET(dateTx) : new Date(dateTx);
       if (!date) continue;
 
       weeks.push({
@@ -472,17 +472,24 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
   opt = opt || {};
   var inclusive = !!opt.inclusive;
 
+  // Performance optimization: limit messages per execution
+  var maxProcess = opt.maxProcess || POLL_MAX_MESSAGES_PER_RUN || 5;
+  var startTime = Date.now();
+  var maxTime = opt.maxTime || POLL_SOFT_DEADLINE_MS || 270000; // 4.5 minutes default
+
   var processed = 0;
   var updatedPairs = 0;
   var errors = [];
   var lastId = startId ? String(startId) : '';
+  var stoppedEarly = false;
+  var stopReason = '';
 
   // 0) If inclusive: try to fetch/process the start message itself
   if (inclusive && startId) {
     try {
       var msg0 = _fetchSingleMessageInclusive_(channelId, String(startId)); // best-effort
       if (msg0) {
-        var res0 = _processOneDiscordMessage_(msg0);
+        var res0 = _processOneDiscordMessage_(msg0, startTime);
         processed++;
         if (res0 && res0.updated) updatedPairs += res0.updated;
         lastId = String(msg0.id || lastId);
@@ -492,12 +499,31 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
     }
   }
 
-  // 1) Now walk forward “after” the (possibly same) startId
+  // 1) Now walk forward "after" the (possibly same) startId
   var cursor = startId || lastId || '';
   var pageLimit = 100; // how many to fetch per page (relay dependent)
-  var loops = 0, SAFETY = 50; // don’t infinite-loop
+  var loops = 0, SAFETY = 50; // don't infinite-loop
 
   while (loops++ < SAFETY) {
+    // Check execution time before fetching next page
+    if (typeof getRemainingTime === 'function') {
+      var timeCheck = getRemainingTime(startTime, maxTime);
+      if (timeCheck.shouldStop) {
+        stoppedEarly = true;
+        stopReason = 'time_limit';
+        sendLog_(`⏱️ Time limit approaching (${timeCheck.percentUsed}% used), stopping at ${processed} messages`);
+        break;
+      }
+    }
+
+    // Check batch limit
+    if (processed >= maxProcess) {
+      stoppedEarly = true;
+      stopReason = 'batch_limit';
+      sendLog_(`📦 Batch limit reached (${maxProcess} messages), will resume in next execution`);
+      break;
+    }
+
     var page = [];
     try {
       // Your relay uses `after` semantics: returns messages with id > after
@@ -512,9 +538,27 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
     page.sort(function (a, b) { return BigInt(a.id) < BigInt(b.id) ? -1 : 1; });
 
     for (var i = 0; i < page.length; i++) {
+      // Check time and batch limits before processing each message
+      if (processed >= maxProcess) {
+        stoppedEarly = true;
+        stopReason = 'batch_limit';
+        sendLog_(`📦 Batch limit reached (${maxProcess} messages)`);
+        break;
+      }
+
+      if (typeof getRemainingTime === 'function') {
+        var tc = getRemainingTime(startTime, maxTime);
+        if (tc.shouldStop) {
+          stoppedEarly = true;
+          stopReason = 'time_limit';
+          sendLog_(`⏱️ Time limit approaching (${tc.percentUsed}% used), stopping at ${processed} messages`);
+          break;
+        }
+      }
+
       var msg = page[i];
       try {
-        var res = _processOneDiscordMessage_(msg);
+        var res = _processOneDiscordMessage_(msg, startTime);
         processed++;
         if (res && res.updated) {
           updatedPairs += res.updated;
@@ -526,6 +570,10 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
         errors.push('process ' + String(msg && msg.id) + ': ' + String(e && e.message || e));
       }
     }
+
+    // If we stopped early in the inner loop, break outer loop too
+    if (stoppedEarly) break;
+
     // advance cursor to last processed id
     cursor = lastId;
     // If fewer than pageLimit, we reached the end
@@ -535,19 +583,43 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
   // 2) Persist last pointer
   if (lastId) _setPointer_(lastId);
 
+  // Calculate execution stats
+  var elapsed = Date.now() - startTime;
+  var elapsedSec = Math.round(elapsed / 1000);
+  var percentUsed = Math.round((elapsed / maxTime) * 100);
+
+  // Enhanced logging with stats
   logParsingSummary_(successCount, tentativeCount, opt.channelName || 'match-alerts');
+
+  if (stoppedEarly) {
+    sendLog_(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - stopped: ${stopReason}`);
+  } else {
+    sendLog_(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - finished all available`);
+  }
 
   return {
     processed: processed,
     updatedPairs: updatedPairs,
     errors: errors,
-    lastPointer: lastId
+    lastPointer: lastId,
+    stoppedEarly: stoppedEarly,
+    stopReason: stopReason,
+    elapsedMs: elapsed
   }
 }
 
 /** Process one Discord message through: content → parse → update */
-function _processOneDiscordMessage_(msg) {
+function _processOneDiscordMessage_(msg, startTime) {
   if (!msg || !msg.content) return { updated: 0 };
+
+  // Optional time check to prevent processing if we're running out of time
+  if (startTime && typeof getRemainingTime === 'function') {
+    var timeCheck = getRemainingTime(startTime);
+    if (timeCheck.shouldStop) {
+      sendLog_(`⏱️ Skipping message ${msg.id} - time limit approaching`);
+      return { updated: 0, skipped: true, reason: 'timeout_prevention' };
+    }
+  }
 
   let parsed = null;
   let raw = null;
@@ -615,8 +687,8 @@ function _processOneDiscordMessage_(msg) {
  */
 function parseScheduleMessage_v3(text) {
   var trace = [];
-  __TEAM_ALIAS_CACHE = null;
-  __TEAM_INDEX_CACHE = null; // Clear team index cache too
+  TEAM_ALIAS_CACHE = null;
+  TEAM_INDEX_CACHE = null; // Clear team index cache too
   try {
     var raw = String(text || '');
     raw = _cleanScheduleText_(raw);
@@ -660,7 +732,7 @@ function parseScheduleMessage_v3(text) {
       return { ok: false, error: 'week_not_found', trace: trace };
     }
     if (typeof syncHeaderMetaToTables_ === 'function') week = syncHeaderMetaToTables_(week, division);
-    var wkKey = (typeof weekKey_ === 'function') ? weekKey_(week) : (Utilities.formatDate(week.date, 'America/New_York', 'yyyy-MM-dd') + '|' + (week.mapRef || ''));
+    var wkKey = (typeof weekKey === 'function') ? weekKey(week) : (Utilities.formatDate(week.date, 'America/New_York', 'yyyy-MM-dd') + '|' + (week.mapRef || ''));
 
     var pair = {
       division: division,

@@ -6,7 +6,7 @@
  * Get version information for display
  * @returns {Object} {version, date, formatted}
  */
-function getVersionInfo_() {
+function getVersionInfo() {
   const v = (typeof VERSION !== 'undefined') ? VERSION : '0.0.0';
   const d = (typeof VERSION_DATE !== 'undefined') ? VERSION_DATE : 'unknown';
   return {
@@ -20,8 +20,8 @@ function getVersionInfo_() {
  * Log version info to Discord on startup/config changes
  * Call this from any initialization function or manually from menu
  */
-function logVersionToDiscord_() {
-  const info = getVersionInfo_();
+function logVersionToDiscord() {
+  const info = getVersionInfo();
   const msg = `🤖 **KTPScoreBot-WeeklyMatches** ${info.formatted} ready`;
 
   // Use sendLog_ if available, otherwise post directly
@@ -34,11 +34,11 @@ function logVersionToDiscord_() {
 
 function ktpEmoji() { return '<:ktp:' + KTP_EMOJI_ID + '>'; }
 
-function normalizeWhitespace_(s) {
+function normalizeWhitespace(s) {
   return String(s || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
 }
 
-function isJustPings_(s) {
+function isJustPings(s) {
   // Heuristic: if after removing mentions/emojis we have almost nothing, treat as pings
   var t = String(s || '')
     .replace(/<[@#][!&]?\d+>/g, ' ')
@@ -49,7 +49,7 @@ function isJustPings_(s) {
   return t.length < 3;
 }
 
-function decStringMinusOne_(s) {
+function decStringMinusOne(s) {
   s = String(s || '').trim();
   if (!/^\d+$/.test(s)) return null;
   if (s === '0') return '0';
@@ -72,7 +72,7 @@ function decStringMinusOne_(s) {
 
 // ----- DATE & TIME HELPERS -----
 /** Parse a Date from text like "9/28", "09-28-2025", or "Sep 28". */
-function parseDateFromText_(text, refYear) {
+function parseDateFromText(text, refYear) {
   const s = String(text || '');
   const m = s.match(/\b(\d{1,2})[\/\.-](\d{1,2})(?:[\/\.-](\d{2,4}))?\b/);
   if (m) {
@@ -90,16 +90,14 @@ function parseDateFromText_(text, refYear) {
 }
 
 /** Project timezone (or override TZ from script properties). */
-function getTimezone_() {
+function getTimezone() {
   const sp = PropertiesService.getScriptProperties();
   return sp.getProperty('TZ') || Session.getScriptTimeZone() || 'America/New_York';
 }
-/** Alias for compatibility */
-function getTz_() { return getTimezone_(); }
 
 function discordEpochAt9pmFromISO(dateISO, tz) {
   if (!dateISO) return null;
-  tz = tz || (typeof getTimezone_ === 'function' ? getTimezone_() : 'America/New_York');
+  tz = tz || (typeof getTimezone === 'function' ? getTimezone() : 'America/New_York');
   // Apps Script `Date` uses project timezone; set that to your league TZ in Project Settings for perfect alignment.
   var p = String(dateISO).split('-');
   var y = +p[0], m = +p[1] - 1, d = +p[2];
@@ -109,11 +107,11 @@ function discordEpochAt9pmFromISO(dateISO, tz) {
 
 // ----- STRING & TEXT HELPERS -----
 /** Normalize generic token text (lowercase, strip non-alphanumeric). */
-function formatWeeklyNotice_(week, actionWord) {
-  var tz = (week && week.tz) || (typeof getTimezone_ === 'function' ? getTimezone_() : 'America/New_York');
+function formatWeeklyNotice(week, actionWord) {
+  var tz = (week && week.tz) || (typeof getTimezone === 'function' ? getTimezone() : 'America/New_York');
   var season = (week && week.seasonWeek) || '';
   var mapRef = (week && week.mapRef) || '';
-  var seasonInfo = (typeof getSeasonInfo_ === 'function' ? getSeasonInfo_() : '');
+  var seasonInfo = (typeof getSeasonInfo === 'function' ? getSeasonInfo() : '');
   var ts = Utilities.formatDate(new Date(), tz, 'MMM d, h:mm a z');
 
   // :white_check_mark: <KTP_SEASON_INFO> <season> <mapRef> Weekly Boards <Posted/Edited>. <timestamp> <:ktp:...>
@@ -147,42 +145,36 @@ function maxSnowflake(a, b) {
 // ---------- Table formatting helpers (single source of truth) ----------
 
 // Repeat a string n times (used for separators)
-function repeat_(ch, n) {
+function repeat(ch, n) {
   ch = String(ch || '');
   n = Math.max(0, n | 0);
   return (typeof ch.repeat === 'function') ? ch.repeat(n) : new Array(n + 1).join(ch);
 }
 
-function padRight_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return s + (k ? Array(k + 1).join(' ') : ''); }
-function padLeft_(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return (k ? Array(k + 1).join(' ') : '') + s; }
-// Aliases for call sites
-function padR_(s, n) { return padRight_(s, n); }
-function padL_(s, n) { return padLeft_(s, n); }
-
+function padRight(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return s + (k ? Array(k + 1).join(' ') : ''); }
+function padLeft(s, n) { s = String(s || ''); var k = Math.max(0, n - s.length); return (k ? Array(k + 1).join(' ') : '') + s; }
 function truncate(s, n) { s = String(s || ''); return (s.length > n) ? (s.slice(0, n - 1) + '…') : s; }
-function padCenter_(s, n) {s = String(s || ''); var k = Math.max(0, n - s.length), L = Math.floor(k / 2), R = k - L;  return (L ? Array(L + 1).join(' ') : '') + s + (R ? Array(R + 1).join(' ') : '');
-}
-function padC_(s, n) { return padCenter_(s, n); } // Alias for call sites
+function padCenter(s, n) {s = String(s || ''); var k = Math.max(0, n - s.length), L = Math.floor(k / 2), R = k - L;  return (L ? Array(L + 1).join(' ') : '') + s + (R ? Array(R + 1).join(' ') : '');}
 
 // Column widths used by all tables.
 // COL1 = "Home vs Away" column width, COL2 = "Scheduled", COL3 = "Shoutcaster"
-function getTableWidths_() {
+function getTableWidths() {
   return { COL1: 43, COL2: 22, COL3: 12 };
 }
 
-function formatVsCell_(home, away, col1) {
+function formatVsCell(home, away, col1) {
   var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
   home = truncate(String(home || ''), L); away = truncate(String(away || ''), R);
-  return padLeft_(home, L) + token + padRight_(away, R);
+  return padLeft(home, L) + token + padRight(away, R);
 }
 
-function formatVsHeader_(col1) { return formatVsCell_('Home', 'Away', col1); }
+function formatVsHeader(col1) { return formatVsCell('Home', 'Away', col1); }
 
 // Format a single "Home vs Away" cell to match header alignment
-function formatVsRow_(home, away, col1) {
+function formatVsRow(home, away, col1) {
   var token = ' vs ', L = Math.floor((col1 - token.length) / 2), R = col1 - token.length - L;
   home = truncate(String(home || ''), L); away = truncate(String(away || ''), R);
-  return padLeft_(home, L) + token + padRight_(away, R);
+  return padLeft(home, L) + token + padRight(away, R);
 }
 
 function isBye(s) { return /^\s*BYE\s*$/i.test(String(s || '')); }
@@ -198,19 +190,19 @@ function idFromRelay(resp) {
   return null;
 }
 
-function ensureFence_(s) {
+function ensureFence(s) {
   s = String(s || '').trim();
   if (!s) return '';
   return s.startsWith('```') ? s : ('```text\n' + s + '\n```');
 }
 
-function stripFence_(s) {
+function stripFence(s) {
   s = String(s || '');
   var m = s.match(/^```[\s\S]*?\n([\s\S]*?)\n```$/);
   return m ? m[1] : s;
 }
 
-function _chunkByLimit_(raw, maxLen) {
+function chunkByLimit(raw, maxLen) {
   maxLen = maxLen || 1900; // keep headroom for safety
   var out = [];
   var lines = String(raw || '').split('\n');
@@ -235,10 +227,10 @@ function _chunkByLimit_(raw, maxLen) {
 }
 
 // ----- HASH HELPERS -----
-function _hashString_(s) { return sha256Hex_(String(s || '')); }
+function hashString(s) { return sha256Hex(String(s || '')); }
 
 /** 2k-safe hash for strings/objects */
-function sha256Hex_(s) {
+function sha256Hex(s) {
   var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(s), Utilities.Charset.UTF_8);
   var out = '';
   for (var i = 0; i < raw.length; i++) {
@@ -248,19 +240,19 @@ function sha256Hex_(s) {
   return out;
 }
 /** remove volatile fields (timestamp/footer) before hashing header */
-function _safeHeaderHash_(headerObj) {
+function safeHeaderHash(headerObj) {
   try {
     var h = JSON.parse(JSON.stringify(headerObj || {}));
     if (h && h.embeds && h.embeds[0]) {
       if (h.embeds[0].timestamp) delete h.embeds[0].timestamp;
       if (h.embeds[0].footer) delete h.embeds[0].footer;
     }
-    return sha256Hex_(JSON.stringify(h));
+    return sha256Hex(JSON.stringify(h));
   } catch (_) { return ''; }
 }
 
-// Hash embeds without footer noise (like _safeHeaderHash_)
-function _safeEmbedsHash_(embeds) {
+// Hash embeds without footer noise (like safeHeaderHash)
+function safeEmbedsHash(embeds) {
   try {
     var x = JSON.parse(JSON.stringify(embeds || []));
     if (x && x.length) {
@@ -268,33 +260,33 @@ function _safeEmbedsHash_(embeds) {
         if (x[i] && x[i].footer) delete x[i].footer;
       }
     }
-    return sha256Hex_(x);
+    return sha256Hex(x);
   } catch (e) {
-    return sha256Hex_(String(embeds || ''));
+    return sha256Hex(String(embeds || ''));
   }
 }
 
 // ----- CACHING HELPERS -----
 
-function cache_() { return CacheService.getScriptCache(); }
+function cache() { return CacheService.getScriptCache(); }
 
-function cacheGetJson_(key) {
-  const s = cache_().get(key);
+function cacheGetJson(key) {
+  const s = cache().get(key);
   if (!s) return null;
   try { return JSON.parse(s); } catch (e) { return null; }
 }
 
-function cachePutJson_(key, obj, ttlSec) {
-  cache_().put(key, JSON.stringify(obj || {}), Math.min(21600, Math.max(30, ttlSec || 300)));
+function cachePutJson(key, obj, ttlSec) {
+  cache().put(key, JSON.stringify(obj || {}), Math.min(21600, Math.max(30, ttlSec || 300)));
 }
 
-let __TEAM_ALIAS_CACHE = null;
+let TEAM_ALIAS_CACHE = null;
 
-function loadTeamAliases_() {
-  if (__TEAM_ALIAS_CACHE) return __TEAM_ALIAS_CACHE;
+function loadTeamAliases() {
+  if (TEAM_ALIAS_CACHE) return TEAM_ALIAS_CACHE;
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sh = ss.getSheetByName('_Aliases');
-  if (!sh) return (__TEAM_ALIAS_CACHE = {});
+  if (!sh) return (TEAM_ALIAS_CACHE = {});
 
   const data = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues(); // alias | canonical
   const aliasMap = {}; // aliasUpper -> canonicalUpper
@@ -305,7 +297,7 @@ function loadTeamAliases_() {
     if (a && c) aliasMap[a] = c;
   }
 
-  __TEAM_ALIAS_CACHE = aliasMap;
+  TEAM_ALIAS_CACHE = aliasMap;
   return aliasMap;
 }
 
@@ -314,12 +306,12 @@ function loadTeamAliases_() {
  * Returns { teams: [ { name, division, aliases: [] }, ... ] }
  * Uses TEAM_CANON_RANGE (A3:A22) from each division sheet + _Aliases sheet.
  */
-var __TEAM_INDEX_CACHE = null;
-function getTeamIndexCached_() {
-  if (__TEAM_INDEX_CACHE) return __TEAM_INDEX_CACHE;
+var TEAM_INDEX_CACHE = null;
+function getTeamIndexCached() {
+  if (TEAM_INDEX_CACHE) return TEAM_INDEX_CACHE;
 
   const teams = [];
-  const aliasMap = loadTeamAliases_(); // aliasUpper -> canonicalUpper
+  const aliasMap = loadTeamAliases(); // aliasUpper -> canonicalUpper
 
   // Invert alias map: canonicalUpper -> [aliasUpper1, aliasUpper2, ...]
   const canonToAliases = {};
@@ -329,7 +321,7 @@ function getTeamIndexCached_() {
   }
 
   // Read team names from each division
-  const divs = (typeof getDivisionSheets_ === 'function') ? getDivisionSheets_() : ['Bronze', 'Silver', 'Gold'];
+  const divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   for (const div of divs) {
     const sh = (typeof getSheetByName === 'function') ? getSheetByName(div) : null;
     if (!sh) continue;
@@ -350,8 +342,8 @@ function getTeamIndexCached_() {
     }
   }
 
-  __TEAM_INDEX_CACHE = { teams };
-  return __TEAM_INDEX_CACHE;
+  TEAM_INDEX_CACHE = { teams };
+  return TEAM_INDEX_CACHE;
 }
 
 
@@ -362,7 +354,7 @@ function getTeamIndexCached_() {
  * Strategy: split on blank lines between sections, pack sections into
  * chunks <= ~3900 chars, preserving the existing ``` fences inside sections.
  */
-function _tablesBodyToEmbeds_(body) {
+function tablesBodyToEmbeds(body) {
   var MAX = 3900; // under 4096 to allow small headroom
   var parts = String(body || '').split(/\n{2,}/); // split on blank lines
   var embeds = [];
@@ -400,24 +392,10 @@ function _tablesBodyToEmbeds_(body) {
   return embeds;
 }
 
-
-// ----- LOGGING -----
-
-/** Append a log entry (timestamped) to console and optionally to Discord log channel. */
-function logLocal_(level, event, data) {
-  try {
-    const ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
-    const line = `[${level}] ${ts} ${event} ${data ? JSON.stringify(data) : ''}`;
-    console.log(line);
-  } catch (e) {
-    // If console logging fails for any reason, do nothing.
-  }
-}
-
 // ----- SHEET HELPERS -----
 
 /** Get list of division sheet names (from constant DIVISIONS or stored property). */
-function getDivisionSheets_() {
+function getDivisionSheets() {
   // Use constant DIVISIONS if available and non-empty
   if (Array.isArray(DIVISIONS) && DIVISIONS.length) {
     return DIVISIONS.slice();
@@ -434,13 +412,16 @@ function getDivisionSheets_() {
   return ['Bronze', 'Silver', 'Gold'];
 }
 
-/** Return the Google Sheet object for a name. */
+/** Returns a sheet by name from the configured spreadsheet. */
 function getSheetByName(sheetName) {
+  if (!SPREADSHEET_ID) {
+    throw new Error('SPREADSHEET_ID not configured in Script Properties');
+  }
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  return ss.getSheetByName(String(sheetName)) || null;
+  return ss.getSheetByName(sheetName);
 }
 
-function getSeasonInfo_() {
+function getSeasonInfo() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sh = ss.getSheetByName(SEASON_INFO);
   if (!sh) return '';
@@ -448,21 +429,41 @@ function getSeasonInfo_() {
   return String(v || '').trim();
 }
 
-function colIdx_(letter) {
+function colIdx(letter) {
   letter = String(letter || '').toUpperCase();
   var n = 0;
   for (var i = 0; i < letter.length; i++) n = n * 26 + (letter.charCodeAt(i) - 64);
   return n || 1;
 }
 
-function getGridCols_() {
+function getGridCols() {
   var sp = PropertiesService.getScriptProperties();
   function getOrDef(key, def) { return (sp.getProperty(key) || def); }
-  var WL1 = colIdx_(getOrDef('GRID_COL_WL1', 'B'));
-  var T1 = colIdx_(getOrDef('GRID_COL_TEAM1', 'C'));
-  var S1 = colIdx_(getOrDef('GRID_COL_SCORE1', 'D'));
-  var WL2 = colIdx_(getOrDef('GRID_COL_WL2', 'F'));
-  var T2 = colIdx_(getOrDef('GRID_COL_TEAM2', 'G'));
-  var S2 = colIdx_(getOrDef('GRID_COL_SCORE2', 'H'));
+  var WL1 = colIdx(getOrDef('GRID_COL_WL1', 'B'));
+  var T1 = colIdx(getOrDef('GRID_COL_TEAM1', 'C'));
+  var S1 = colIdx(getOrDef('GRID_COL_SCORE1', 'D'));
+  var WL2 = colIdx(getOrDef('GRID_COL_WL2', 'F'));
+  var T2 = colIdx(getOrDef('GRID_COL_TEAM2', 'G'));
+  var S2 = colIdx(getOrDef('GRID_COL_SCORE2', 'H'));
   return { WL1: WL1, T1: T1, S1: S1, WL2: WL2, T2: T2, S2: S2 };
+}
+
+// ----- EXECUTION TIME MONITORING -----
+
+/**
+ * Monitor execution time and determine if we should stop processing.
+ * @param {number} startTime - Start time from Date.now()
+ * @param {number} maxTime - Maximum execution time in milliseconds (default 300000 = 5 minutes)
+ * @returns {Object} { elapsed, remaining, percentUsed, shouldStop }
+ */
+function getRemainingTime(startTime, maxTime) {
+  maxTime = maxTime || 300000; // 5 minutes default (300 seconds)
+  var elapsed = Date.now() - startTime;
+  var remaining = maxTime - elapsed;
+  return {
+    elapsed: elapsed,
+    remaining: remaining,
+    percentUsed: Math.round((elapsed / maxTime) * 100),
+    shouldStop: remaining < 30000 // Stop if less than 30 seconds left
+  };
 }
