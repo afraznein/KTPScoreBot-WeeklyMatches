@@ -6,45 +6,44 @@
 // Used by: 30_relay.gs (event handlers), 70_updates.gs
 //
 // Functions in this module:
-// - _getMapAliasCatalog_()
-// - _aliasesForMap_(canon)
-// - _extractMapHint_(text)
-// - _teamSynonyms_()
-// - _stripDiscordNoise_(s)
-// - _extractDivisionHint_(s)
-// - _splitVsSides_(s)
-// - _stripOrdinalSuffixes_(rawDate)
-// - _cleanScheduleText_(raw)
-// - resolveTeamAlias_(rawInput)
-// - _matchTeam_(snippet, forcedDivision)
-// - _normalizeTeamText_(s)
-// - normalizeTeam_(s)
-// - _scoreTeamMatch_(a, b)
-// - _parseWhenFlexible_(s, hintDiv, hintMap)
-// - _buildWeekListFromSheets_()
-// - _chooseWeekForPair_(division, home, away, weekList, hintMap, rawText, when)
-// - _findWeekByMapAndPair_(division, map, home, away, weekList)
-// - _findWeekByDateAndPair_(division, dateObj, home, away, weekList)
-// - _findPastUnplayedWeekForPair_(division, home, away, weekList)
-// - _isSameWeek_(d1, d2)
-// - _hasTeamsInWeek_(week, home, away)
-// - _pollAndProcessFromId_(channelId, startId, opt)
-// - _processOneDiscordMessage_(msg)
+// - getMapAliasCatalog()
+// - aliasesForMap(canon)
+// - extractMapHint(text)
+// - teamSynonyms()
+// - stripDiscordNoise(s)
+// - extractDivisionHint(s)
+// - splitVsSides(s)
+// - stripOrdinalSuffixes(rawDate)
+// - cleanScheduleText(raw)
+// - resolveTeamAlias(rawInput)
+// - matchTeam(snippet, forcedDivision)
+// - normalizeTeamText(s)
+// - scoreTeamMatch(a, b)
+// - parseWhenFlexible(s, hintDiv, hintMap)
+// - buildWeekListFromSheets()
+// - chooseWeekForPair(division, home, away, weekList, hintMap, rawText, when)
+// - findWeekByMapAndPair(division, map, home, away, weekList)
+// - findWeekByDateAndPair(division, dateObj, home, away, weekList)
+// - findPastUnplayedWeekForPair(division, home, away, weekList)
+// - isSameWeek(d1, d2)
+// - hasTeamsInWeek(week, home, away)
+// - pollAndProcessFromId(channelId, startId, opt)
+// - processOneDiscordMessage(msg)
 // - parseScheduleMessage_v3(text)
 //
-// Total: 25 functions
+// Total: 24 functions
 // =======================
 // =======================
 // parser.gs – Discord message parsing logic
 // =======================
 /** Build alias→canon map from the General sheet list. Cached per execution. */
-function _getMapAliasCatalog_() {
+function getMapAliasCatalog() {
   var canonList = (typeof getAllMapsList === 'function') ? getAllMapsList() : [];
   var aliasToCanon = {};
   for (var i = 0; i < canonList.length; i++) {
     var canon = String(canonList[i] || '').trim();
     if (!canon) continue;
-    var aliases = _aliasesForMap_(canon);
+    var aliases = aliasesForMap(canon);
     for (var j = 0; j < aliases.length; j++) {
       aliasToCanon[aliases[j]] = canon; // last wins (fine)
     }
@@ -53,7 +52,7 @@ function _getMapAliasCatalog_() {
 }
 
 /** Generate useful aliases for a canonical map id like "dod_railyard_b6". */
-function _aliasesForMap_(canon) {
+function aliasesForMap(canon) {
   var c = String(canon || '').toLowerCase();
 
   // Normalize once
@@ -91,12 +90,12 @@ function _aliasesForMap_(canon) {
  * Matches whole-word-ish with underscores/hyphens/space flexibility,
  * and prefers longer aliases first to avoid short collisions.
  */
-function _extractMapHint_(text) {
+function extractMapHint(text) {
   var t = String(text || '').toLowerCase();
   // relaxed version where underscores and hyphens are treated like spaces
   var relax = t.replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-  var aliasToCanon = _getMapAliasCatalog_();
+  var aliasToCanon = getMapAliasCatalog();
   var aliases = Object.keys(aliasToCanon);
 
   // Sort longest first to avoid partial overshadowing (e.g., "rail" vs "railyard b6")
@@ -120,14 +119,14 @@ function _extractMapHint_(text) {
 }
 
 // Optional team synonym map from Script Properties (JSON)
-function _teamSynonyms_() {
+function teamSynonyms() {
   try {
     var sp = PropertiesService.getScriptProperties().getProperty('TEAM_SYNONYMS_JSON');
     return sp ? JSON.parse(sp) : {};
   } catch (_) { return {}; }
 }
 
-function _stripDiscordNoise_(s) {
+function stripDiscordNoise(s) {
   var t = String(s || '');
 
   // remove mentions <@123>, <@!123>, <@&role>, <#channel>
@@ -140,13 +139,13 @@ function _stripDiscordNoise_(s) {
   return t;
 }
 
-function _extractDivisionHint_(s) {
+function extractDivisionHint(s) {
   var m = s.match(/\b(bronze|silver|gold)\b\s*:?/i);
   return m ? (m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase()) : null;
 }
 
-// --- Enhanced _splitVsSides_ to handle "between A and B" and strip division hints ---
-function _splitVsSides_(s) {
+// --- Enhanced splitVsSides to handle "between A and B" and strip division hints ---
+function splitVsSides(s) {
   var norm = s.replace(/\s*-\s*/g, ' - ');
 
 
@@ -181,12 +180,10 @@ function _splitVsSides_(s) {
 }
 
 // --- Normalize ordinal suffixes in dates (e.g., 12th → 12) ---
-function _stripOrdinalSuffixes_(rawDate) {
-  return rawDate.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
-}
+function stripOrdinalSuffixes(rawDate) { return rawDate.replace(/(\d+)(st|nd|rd|th)/gi, '$1') }
 
 // --- Sanitize raw text for parsing (ignore second timezones, remove foreign weekday mentions) ---
-function _cleanScheduleText_(raw) {
+function cleanScheduleText(raw) {
   return raw
     .replace(/\/\s*Domingo.*$/i, '')
     .replace(/\b\d{1,2}:\d{2}\s*(BRT|CET|UTC|GMT|JST|PST|PT|ART|IST).*/gi, '')
@@ -195,7 +192,7 @@ function _cleanScheduleText_(raw) {
 }
 
 // --- Enhanced Team Alias Resolver ---
-function resolveTeamAlias_(rawInput) {
+function resolveTeamAlias(rawInput) {
   TEAM_ALIAS_CACHE = null; // Always force reload from sheet
   TEAM_INDEX_CACHE = null; // Clear team index cache too
   const aliasMap = loadTeamAliases();
@@ -204,16 +201,16 @@ function resolveTeamAlias_(rawInput) {
 }
 
 
-// --- Enhanced _matchTeam_ to use aliases ---
-function _matchTeam_(snippet, forcedDivision) {
+// --- Enhanced matchTeam to use aliases ---
+function matchTeam(snippet, forcedDivision) {
   var idx = (typeof getTeamIndexCached === 'function') ? getTeamIndexCached() : null;
   if (!idx || !idx.teams || !idx.teams.length) return null;
 
 
-  var syn = _teamSynonyms_();
-  var resolved = resolveTeamAlias_(snippet);
-  var s = _normalizeTeamText_(resolved);
-  if (syn[s]) s = _normalizeTeamText_(syn[s]);
+  var syn = teamSynonyms();
+  var resolved = resolveTeamAlias(snippet);
+  var s = normalizeTeamText(resolved);
+  if (syn[s]) s = normalizeTeamText(syn[s]);
 
 
   var best = null, bestScore = -1;
@@ -222,12 +219,12 @@ function _matchTeam_(snippet, forcedDivision) {
     if (forcedDivision && String(t.division || '').toLowerCase() !== String(forcedDivision || '').toLowerCase()) continue;
 
 
-    var cand = _normalizeTeamText_(t.name);
-    var sc = _scoreTeamMatch_(s, cand);
+    var cand = normalizeTeamText(t.name);
+    var sc = scoreTeamMatch(s, cand);
     if (Array.isArray(t.aliases)) {
       for (var j = 0; j < t.aliases.length; j++) {
-        var al = _normalizeTeamText_(t.aliases[j]);
-        sc = Math.max(sc, _scoreTeamMatch_(s, al));
+        var al = normalizeTeamText(t.aliases[j]);
+        sc = Math.max(sc, scoreTeamMatch(s, al));
       }
     }
     if (sc > bestScore) { bestScore = sc; best = t; }
@@ -236,8 +233,7 @@ function _matchTeam_(snippet, forcedDivision) {
   return { name: best.name, division: best.division };
 }
 
-
-function _normalizeTeamText_(s) {
+function normalizeTeamText(s) {
   return String(s || '')
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
@@ -245,12 +241,7 @@ function _normalizeTeamText_(s) {
     .trim();
 }
 
-/** Normalize team name for match key generation (alias to _normalizeTeamText_) */
-function normalizeTeam_(s) {
-  return _normalizeTeamText_(s);
-}
-
-function _scoreTeamMatch_(a, b) {
+function scoreTeamMatch(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 10;
   if (b.indexOf(a) >= 0) return Math.min(8, a.length); // partial contained
@@ -266,7 +257,7 @@ function _scoreTeamMatch_(a, b) {
   return hits;
 }
 
-function _parseWhenFlexible_(s, hintDiv, hintMap) {
+function parseWhenFlexible(s, hintDiv, hintMap) {
   var tz = 'America/New_York';
   var lower = s.toLowerCase();
 
@@ -333,8 +324,8 @@ function _parseWhenFlexible_(s, hintDiv, hintMap) {
 
   // If still no date, but we have a division/map hint → use that week’s default Sunday
   if (!dateObj) {
-    var wk = (typeof getAlignedUpcomingWeekOrReport_ === 'function') ? getAlignedUpcomingWeekOrReport_() : {};
-    if (typeof syncHeaderMetaToTables_ === 'function') wk = syncHeaderMetaToTables_(wk, hintDiv || 'Bronze');
+    var wk = (typeof getAlignedUpcomingWeekOrReport === 'function') ? getAlignedUpcomingWeekOrReport() : {};
+    if (typeof syncHeaderMetaToTables === 'function') wk = syncHeaderMetaToTables(wk, hintDiv || 'Bronze');
     if (wk && wk.date) {
       var d = wk.date;
       dateObj = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -354,7 +345,7 @@ function _parseWhenFlexible_(s, hintDiv, hintMap) {
 }
 
 /** Build a list of all weeks from all division sheets */
-function _buildWeekListFromSheets_() {
+function buildWeekListFromSheets() {
   var weeks = [];
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var G = gridMeta();
@@ -391,65 +382,58 @@ function _buildWeekListFromSheets_() {
   return weeks;
 }
 
-// --- Enhanced _chooseWeekForPair_ with weekList threaded into helpers ---
-function _chooseWeekForPair_(division, home, away, weekList, hintMap, rawText, when) {
-  var wk = (typeof getAlignedUpcomingWeekOrReport_ === 'function') ? getAlignedUpcomingWeekOrReport_() : {};
-  if (typeof syncHeaderMetaToTables_ === 'function') wk = syncHeaderMetaToTables_(wk, division || 'Bronze');
-
+// --- Enhanced chooseWeekForPair with weekList threaded into helpers ---
+function chooseWeekForPair(division, home, away, weekList, hintMap, rawText, when) {
+  var wk = (typeof getAlignedUpcomingWeekOrReport === 'function') ? getAlignedUpcomingWeekOrReport() : {};
+  if (typeof syncHeaderMetaToTables === 'function') wk = syncHeaderMetaToTables(wk, division || 'Bronze');
 
   if (hintMap) {
-    var wByMap = _findWeekByMapAndPair_(division, hintMap, home, away, weekList);
+    var wByMap = findWeekByMapAndPair(division, hintMap, home, away, weekList);
     if (wByMap) return wByMap;
   }
 
-
   if (when && typeof when.epochSec === 'number') {
     var d = new Date(when.epochSec * 1000);
-    var wByDate = _findWeekByDateAndPair_(division, d, home, away, weekList);
+    var wByDate = findWeekByDateAndPair(division, d, home, away, weekList);
     if (wByDate) return wByDate;
   }
 
-
   var lower = String(rawText || '').toLowerCase();
   if (/\b(make[- ]?up|postponed|rematch)\b/.test(lower)) {
-    var wPast = _findPastUnplayedWeekForPair_(division, home, away, weekList);
+    var wPast = findPastUnplayedWeekForPair(division, home, away, weekList);
     if (wPast) return wPast;
   }
-
 
   return wk;
 }
 
 // --- Helper function updates to support weekList injection ---
-function _findWeekByMapAndPair_(division, map, home, away, weekList) {
+function findWeekByMapAndPair(division, map, home, away, weekList) {
   if (!Array.isArray(weekList)) return null;
   map = map.toLowerCase();
-  return weekList.find(w => w.division === division && w.map.toLowerCase() === map && _hasTeamsInWeek_(w, home, away));
+  return weekList.find(w => w.division === division && w.map.toLowerCase() === map && hasTeamsInWeek(w, home, away));
 }
 
-
-function _findWeekByDateAndPair_(division, dateObj, home, away, weekList) {
+function findWeekByDateAndPair(division, dateObj, home, away, weekList) {
   if (!Array.isArray(weekList)) return null;
   return weekList.find(w => {
     if (w.division !== division) return false;
     var weekDate = new Date(w.defaultDate);
-    return _isSameWeek_(dateObj, weekDate) && _hasTeamsInWeek_(w, home, away);
+    return isSameWeek(dateObj, weekDate) && hasTeamsInWeek(w, home, away);
   });
 }
 
-
-function _findPastUnplayedWeekForPair_(division, home, away, weekList) {
+function findPastUnplayedWeekForPair(division, home, away, weekList) {
   if (!Array.isArray(weekList)) return null;
   for (var i = 0; i < weekList.length; i++) {
     var wk = weekList[i];
     if (wk.division !== division) continue;
-    if (_hasTeamsInWeek_(wk, home, away) && !wk.played) return wk;
+    if (hasTeamsInWeek(wk, home, away) && !wk.played) return wk;
   }
   return null;
 }
 
-
-function _isSameWeek_(d1, d2) {
+function isSameWeek(d1, d2) {
   var startOfWeek = date => {
     var day = new Date(date);
     day.setHours(0, 0, 0, 0);
@@ -460,13 +444,12 @@ function _isSameWeek_(d1, d2) {
   return startOfWeek(d1).getTime() === startOfWeek(d2).getTime();
 }
 
-
-function _hasTeamsInWeek_(week, home, away) {
+function hasTeamsInWeek(week, home, away) {
   if (!week || !Array.isArray(week.matches)) return false;
   return week.matches.some(m => m.home === home && m.away === away);
 }
 
-function _pollAndProcessFromId_(channelId, startId, opt) {
+function pollAndProcessFromId(channelId, startId, opt) {
   var successCount = 0;
   var tentativeCount = 0;
   opt = opt || {};
@@ -487,9 +470,9 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
   // 0) If inclusive: try to fetch/process the start message itself
   if (inclusive && startId) {
     try {
-      var msg0 = _fetchSingleMessageInclusive_(channelId, String(startId)); // best-effort
+      var msg0 = fetchSingleMessageInclusive(channelId, String(startId)); // best-effort
       if (msg0) {
-        var res0 = _processOneDiscordMessage_(msg0, startTime);
+        var res0 = processOneDiscordMessage(msg0, startTime);
         processed++;
         if (res0 && res0.updated) updatedPairs += res0.updated;
         lastId = String(msg0.id || lastId);
@@ -511,7 +494,7 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
       if (timeCheck.shouldStop) {
         stoppedEarly = true;
         stopReason = 'time_limit';
-        sendLog_(`⏱️ Time limit approaching (${timeCheck.percentUsed}% used), stopping at ${processed} messages`);
+        sendLog(`⏱️ Time limit approaching (${timeCheck.percentUsed}% used), stopping at ${processed} messages`);
         break;
       }
     }
@@ -520,14 +503,14 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
     if (processed >= maxProcess) {
       stoppedEarly = true;
       stopReason = 'batch_limit';
-      sendLog_(`📦 Batch limit reached (${maxProcess} messages), will resume in next execution`);
+      sendLog(`📦 Batch limit reached (${maxProcess} messages), will resume in next execution`);
       break;
     }
 
     var page = [];
     try {
       // Your relay uses `after` semantics: returns messages with id > after
-      page = fetchChannelMessages_(channelId, { after: cursor, limit: pageLimit }) || [];
+      page = fetchChannelMessages(channelId, { after: cursor, limit: pageLimit }) || [];
     } catch (e) {
       errors.push('fetch page failed: ' + String(e && e.message || e));
       break;
@@ -542,7 +525,7 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
       if (processed >= maxProcess) {
         stoppedEarly = true;
         stopReason = 'batch_limit';
-        sendLog_(`📦 Batch limit reached (${maxProcess} messages)`);
+        sendLog(`📦 Batch limit reached (${maxProcess} messages)`);
         break;
       }
 
@@ -551,14 +534,14 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
         if (tc.shouldStop) {
           stoppedEarly = true;
           stopReason = 'time_limit';
-          sendLog_(`⏱️ Time limit approaching (${tc.percentUsed}% used), stopping at ${processed} messages`);
+          sendLog(`⏱️ Time limit approaching (${tc.percentUsed}% used), stopping at ${processed} messages`);
           break;
         }
       }
 
       var msg = page[i];
       try {
-        var res = _processOneDiscordMessage_(msg, startTime);
+        var res = processOneDiscordMessage(msg, startTime);
         processed++;
         if (res && res.updated) {
           updatedPairs += res.updated;
@@ -581,7 +564,7 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
   }
 
   // 2) Persist last pointer
-  if (lastId) _setPointer_(lastId);
+  if (lastId) setPointer(lastId);
 
   // Calculate execution stats
   var elapsed = Date.now() - startTime;
@@ -589,12 +572,12 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
   var percentUsed = Math.round((elapsed / maxTime) * 100);
 
   // Enhanced logging with stats
-  logParsingSummary_(successCount, tentativeCount, opt.channelName || 'match-alerts');
+  logParsingSummary(successCount, tentativeCount, opt.channelName || 'match-alerts');
 
   if (stoppedEarly) {
-    sendLog_(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - stopped: ${stopReason}`);
+    sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - stopped: ${stopReason}`);
   } else {
-    sendLog_(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - finished all available`);
+    sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - finished all available`);
   }
 
   return {
@@ -609,14 +592,14 @@ function _pollAndProcessFromId_(channelId, startId, opt) {
 }
 
 /** Process one Discord message through: content → parse → update */
-function _processOneDiscordMessage_(msg, startTime) {
+function processOneDiscordMessage(msg, startTime) {
   if (!msg || !msg.content) return { updated: 0 };
 
   // Optional time check to prevent processing if we're running out of time
   if (startTime && typeof getRemainingTime === 'function') {
     var timeCheck = getRemainingTime(startTime);
     if (timeCheck.shouldStop) {
-      sendLog_(`⏱️ Skipping message ${msg.id} - time limit approaching`);
+      sendLog(`⏱️ Skipping message ${msg.id} - time limit approaching`);
       return { updated: 0, skipped: true, reason: 'timeout_prevention' };
     }
   }
@@ -625,13 +608,13 @@ function _processOneDiscordMessage_(msg, startTime) {
   let raw = null;
   try {
     raw = msg.content;
-    sendLog_(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 100)}..."`);
+    sendLog(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 100)}..."`);
 
     parsed = parseScheduleMessage_v3(raw);
-    sendLog_(`🧪 Parsed: ${JSON.stringify(parsed)}`);
+    sendLog(`🧪 Parsed: ${JSON.stringify(parsed)}`);
 
     if (!parsed || !parsed.ok || !parsed.team1 || !parsed.team2 || !parsed.division) {
-      sendLog_(`⚠️ Skipped message ID: ${msg?.id} — unable to parse.`);
+      sendLog(`⚠️ Skipped message ID: ${msg?.id} — unable to parse.`);
       return { updated: 0 };
     }
 
@@ -640,37 +623,37 @@ function _processOneDiscordMessage_(msg, startTime) {
     const isRematch = parsed.isRematch || false;
 
     // Log this parsed result
-    logMatchToWMLog_(parsed, msg.author?.id || msg.authorId, msg.channel?.name || msg.channelName || msg.channel, isTentative, isRematch);
+    logMatchToWMLog(parsed, msg.author?.id || msg.authorId, msg.channel?.name || msg.channelName || msg.channel, isTentative, isRematch);
 
     // Update tables: find row, update store, refresh Discord board
     let updateResult = null;
     try {
-      if (typeof updateTablesMessageFromPairs_ === 'function' && parsed.pairs && parsed.weekKey) {
-        updateResult = updateTablesMessageFromPairs_(parsed.weekKey, parsed.pairs);
+      if (typeof updateTablesMessageFromPairs === 'function' && parsed.pairs && parsed.weekKey) {
+        updateResult = updateTablesMessageFromPairs(parsed.weekKey, parsed.pairs);
 
         if (updateResult.updated > 0) {
-          sendLog_(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>`);
+          sendLog(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>`);
         }
 
         if (updateResult.unmatched && updateResult.unmatched.length > 0) {
           const reasons = updateResult.unmatched.map(u => u.reason).join(', ');
-          sendLog_(`⚠️ ${parsed.division} • ? • Unmapped — ${parsed.team1} vs ${parsed.team2} (${reasons})`);
+          sendLog(`⚠️ ${parsed.division} • ? • Unmapped — ${parsed.team1} vs ${parsed.team2} (${reasons})`);
         }
       }
     } catch (e) {
-      sendLog_(`⚠️ Error updating tables: ${e.message}`);
+      sendLog(`⚠️ Error updating tables: ${e.message}`);
     }
 
     // Send confirmation to log channel
     const rowInfo = (updateResult && updateResult.updated > 0) ? 'Mapped' : 'Unmapped';
-    const line = formatScheduleConfirmationLine_(parsed, null, msg.author?.id, msg.id);
-    if (typeof postChannelMessage_ === 'function') {
-      postChannelMessage_(RESULTS_LOG_CHANNEL_ID, line);
+    const line = formatScheduleConfirmationLine(parsed, null, msg.author?.id, msg.id);
+    if (typeof postChannelMessage === 'function') {
+      postChannelMessage(RESULTS_LOG_CHANNEL_ID, line);
     }
 
   }
   catch (e) {
-    sendLog_(`❌ Error processing message ID ${msg?.id}: ${e.message}`);
+    sendLog(`❌ Error processing message ID ${msg?.id}: ${e.message}`);
     return { updated: 0 };
   }
 
@@ -691,25 +674,25 @@ function parseScheduleMessage_v3(text) {
   TEAM_INDEX_CACHE = null; // Clear team index cache too
   try {
     var raw = String(text || '');
-    raw = _cleanScheduleText_(raw);
-    var cleaned = _stripDiscordNoise_(raw);
+    raw = cleanScheduleText(raw);
+    var cleaned = stripDiscordNoise(raw);
     trace.push('cleaned=' + cleaned);
 
     // division + map hints
-    var hintDiv = _extractDivisionHint_(cleaned);
-    var hintMap = _extractMapHint_(cleaned);
+    var hintDiv = extractDivisionHint(cleaned);
+    var hintMap = extractMapHint(cleaned);
     if (hintDiv) trace.push('hintDiv=' + hintDiv);
     if (hintMap) trace.push('hintMap=' + hintMap);
 
     // teams
-    var sides = _splitVsSides_(cleaned);
+    var sides = splitVsSides(cleaned);
     if (!sides || !sides.a || !sides.b) {
       return { ok: false, error: 'no_vs', trace: trace };
     }
     trace.push('sides=' + JSON.stringify(sides));
 
-    var matchA = _matchTeam_(sides.a, hintDiv);
-    var matchB = _matchTeam_(sides.b, hintDiv);
+    var matchA = matchTeam(sides.a, hintDiv);
+    var matchB = matchTeam(sides.b, hintDiv);
     if (!matchA || !matchB) {
       return { ok: false, error: 'team_not_found', detail: { a: !!matchA, b: !!matchB }, trace: trace };
     }
@@ -720,18 +703,18 @@ function parseScheduleMessage_v3(text) {
     trace.push('division=' + division);
 
     // when
-    var when = _parseWhenFlexible_(cleaned, hintDiv, hintMap);
+    var when = parseWhenFlexible(cleaned, hintDiv, hintMap);
     if (when && when.whenText) trace.push('when=' + JSON.stringify(when));
 
     // Build week list from spreadsheet (all weeks across all divisions)
-    var weekList = _buildWeekListFromSheets_();
+    var weekList = buildWeekListFromSheets();
 
     // which block/week?
-    var week = _chooseWeekForPair_(division, matchA.name, matchB.name, weekList, hintMap, raw, when);
+    var week = chooseWeekForPair(division, matchA.name, matchB.name, weekList, hintMap, raw, when);
     if (!week || !week.date) {
       return { ok: false, error: 'week_not_found', trace: trace };
     }
-    if (typeof syncHeaderMetaToTables_ === 'function') week = syncHeaderMetaToTables_(week, division);
+    if (typeof syncHeaderMetaToTables === 'function') week = syncHeaderMetaToTables(week, division);
     var wkKey = (typeof weekKey === 'function') ? weekKey(week) : (Utilities.formatDate(week.date, 'America/New_York', 'yyyy-MM-dd') + '|' + (week.mapRef || ''));
 
     var pair = {

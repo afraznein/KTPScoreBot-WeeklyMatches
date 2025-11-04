@@ -6,33 +6,33 @@
 // Used by: 70_updates.gs, webapp endpoints
 //
 // Functions in this module:
-// - upsertWeeklyDiscordMessage_(week)
-// - renderCurrentWeekTablesSplit_(week, store)
-// - renderDivisionCurrentTable_(division, week, store, mapName)
-// - _renderDivisionTableSafely_(division, week, store)
-// - _extractTableRows_(rendered)
-// - renderHeaderEmbedPayload_(week)
-// - renderTablesPages_(week, store)
-// - renderDivisionWeekTable_(division, week)
-// - renderWeeklyTablesBody_(week)
-// - renderRematchesTableBody_()
+// - upsertWeeklyDiscordMessage(week)
+// - renderCurrentWeekTablesSplit(week, store)
+// - renderDivisionCurrentTable(division, week, store, mapName)
+// - renderDivisionTableSafely(division, week, store)
+// - extractTableRows(rendered)
+// - renderHeaderEmbedPayload(week)
+// - renderTablesPages(week, store)
+// - renderDivisionWeekTable(division, week)
+// - renderWeeklyTablesBody(week)
+// - renderRematchesTableBody()
 //
 // Total: 10 functions
 // =======================
 
 // ----- Create Weekly Tables -----
 /***** MAIN: upsert header + weekly tables (1 msg) + rematches (N msgs if needed) *****/
-function upsertWeeklyDiscordMessage_(week) {
+function upsertWeeklyDiscordMessage(week) {
   // Normalize week
   week = week || {};
-  if (!week.date && typeof getAlignedUpcomingWeekOrReport_ === 'function') {
-    var w2 = getAlignedUpcomingWeekOrReport_(); if (w2 && w2.date) week = w2;
+  if (!week.date && typeof getAlignedUpcomingWeekOrReport === 'function') {
+    var w2 = getAlignedUpcomingWeekOrReport(); if (w2 && w2.date) week = w2;
   }
   if (!week || !week.date) throw new Error('No aligned week (week.date missing)');
 
   // Keep header meta in sync with grid (choose your canonical division)
-  if (typeof syncHeaderMetaToTables_ === 'function') {
-    week = syncHeaderMetaToTables_(week, 'Gold');
+  if (typeof syncHeaderMetaToTables === 'function') {
+    week = syncHeaderMetaToTables(week, 'Gold');
   }
 
   // Compute wkKey
@@ -48,31 +48,31 @@ function upsertWeeklyDiscordMessage_(week) {
   if (!channelId) throw new Error('WEEKLY_POST_CHANNEL_ID missing');
 
   var store = (typeof loadWeekStore === 'function') ? loadWeekStore(wkKey) : null;
-  var header = (typeof renderHeaderEmbedPayload_ === 'function') ? renderHeaderEmbedPayload_(week) : { embeds: [] };
+  var header = (typeof renderHeaderEmbedPayload === 'function') ? renderHeaderEmbedPayload(week) : { embeds: [] };
 
   // ======== build Weekly Tables body (prefer your working functions) ========
   var weeklyBody = '';
-  if (typeof renderWeeklyTablesBody_ === 'function') {
+  if (typeof renderWeeklyTablesBody === 'function') {
     // your preferred "worked last" implementation
-    var body = renderWeeklyTablesBody_(week, store);
+    var body = renderWeeklyTablesBody(week, store);
     weeklyBody = body ? ensureFence((body)) : '';
-  } else if (typeof renderTablesPages_ === 'function') {
+  } else if (typeof renderTablesPages === 'function') {
     // fallback: join pages into ONE message
-    var pages = renderTablesPages_(week, store) || [];
+    var pages = renderTablesPages(week, store) || [];
     var joined = (Array.isArray(pages) ? pages : [String(pages || '')]).filter(Boolean).join('\n\n');
     weeklyBody = joined ? ensureFence(joined) : '';
   } else {
     // last-resort: try existing split renderer (if present)
-    if (typeof renderCurrentWeekTablesSplit_ === 'function') {
-      var split = renderCurrentWeekTablesSplit_(week) || [];
+    if (typeof renderCurrentWeekTablesSplit === 'function') {
+      var split = renderCurrentWeekTablesSplit(week) || [];
       weeklyBody = split.length ? ensureFence(split.filter(Boolean).join('\n\n')) : '';
     }
   }
 
   // ======== build Rematches (raw; chunk later) ========
   var remBody = '';
-  if (typeof renderRematchesTableBody_ === 'function') {
-    remBody = String(renderRematchesTableBody_(week) || '');
+  if (typeof renderRematchesTableBody === 'function') {
+    remBody = String(renderRematchesTableBody(week) || '');
     remBody = stripFence(remBody.trim());
   }
 
@@ -98,15 +98,15 @@ function upsertWeeklyDiscordMessage_(week) {
   // 1) Header
   try {
     if (!ids.header) {
-      ids.header = postChannelMessageAdvanced_(channelId, '', header.embeds);
+      ids.header = postChannelMessageAdvanced(channelId, '', header.embeds);
       actionHeader = ids.header ? 'created' : 'noop';
     } else if (prevHeaderHash !== headerHash) {
-      editChannelMessageAdvanced_(channelId, ids.header, '', header.embeds);
+      editChannelMessageAdvanced(channelId, ids.header, '', header.embeds);
       actionHeader = 'edited';
     }
   } catch (e) {
     // create once if edit path failed (bad id)
-    ids.header = postChannelMessageAdvanced_(channelId, '', header.embeds);
+    ids.header = postChannelMessageAdvanced(channelId, '', header.embeds);
     actionHeader = ids.header ? 'created' : 'noop';
   }
 
@@ -114,14 +114,14 @@ function upsertWeeklyDiscordMessage_(week) {
   if (weeklyBody) {
     try {
       if (!ids.table) {
-        ids.table = postChannelMessage_(channelId, weeklyBody);
+        ids.table = postChannelMessage(channelId, weeklyBody);
         actionWeekly = ids.table ? 'created' : 'noop';
       } else if (prevWeeklyHash !== weeklyHash) {
-        editChannelMessage_(channelId, ids.table, weeklyBody);
+        editChannelMessage(channelId, ids.table, weeklyBody);
         actionWeekly = 'edited';
       }
     } catch (e) {
-      ids.table = postChannelMessage_(channelId, weeklyBody);
+      ids.table = postChannelMessage(channelId, weeklyBody);
       actionWeekly = ids.table ? 'created' : 'noop';
     }
   }
@@ -129,16 +129,16 @@ function upsertWeeklyDiscordMessage_(week) {
   try {
     if (remBody) {
       if (!ids.rematch) {
-        ids.rematch = postChannelMessage_(channelId, remBody);
+        ids.rematch = postChannelMessage(channelId, remBody);
         // (you may set an actionRematch variable to 'created' if ids.rematch is truthy)
       } else if (prevRemHash !== remHash) {
-        editChannelMessage_(channelId, ids.rematch, remBody);
+        editChannelMessage(channelId, ids.rematch, remBody);
         // set actionRematch = 'edited'
       }
     } else {
       // If no rematches content but an old message exists, delete it
       if (ids.rematch) {
-        try { deleteMessage_(channelId, ids.rematch); } catch (e) { /* log error if needed */ }
+        try { deleteMessage(channelId, ids.rematch); } catch (e) { /* log error if needed */ }
         ids.rematch = '';  // clear the stored ID since it's deleted
         // you could set actionRematch = 'deleted'
       }
@@ -148,7 +148,7 @@ function upsertWeeklyDiscordMessage_(week) {
     // Fallback: if edit failed (e.g., unknown message ID), try posting afresh
     if (remBody) {
       try {
-        ids.rematch = postChannelMessage_(channelId, remBody);
+        ids.rematch = postChannelMessage(channelId, remBody);
         // actionRematch = 'created';
       } catch (e2) {
         throw new Error('Failed to upsert rematches: ' + (e2 && e2.message));
@@ -199,7 +199,7 @@ function upsertWeeklyDiscordMessage_(week) {
 
   // Build and send the notice
   var notice = formatWeeklyNotice(week, actionWord);
-  try { sendLog_(notice); } catch (_) { }
+  try { sendLog(notice); } catch (_) { }
 
   try {
     logLocal('INFO', 'weekly.board.notice', {
@@ -224,24 +224,24 @@ function upsertWeeklyDiscordMessage_(week) {
   };
 }
 
-function renderCurrentWeekTablesSplit_(week, store) {
+function renderCurrentWeekTablesSplit(week, store) {
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var order = ['Bronze', 'Silver', 'Gold'].filter(function (d) { return divs.indexOf(d) !== -1; });
   var parts = [];
   for (var i = 0; i < order.length; i++) {
-    var tbl = renderDivisionCurrentTable_(order[i], week, store);
+    var tbl = renderDivisionCurrentTable(order[i], week, store);
     if (tbl) parts.push(tbl);
   }
   return parts;
 }
 
-function renderDivisionCurrentTable_(division, week, store, mapName) {
+function renderDivisionCurrentTable(division, week, store, mapName) {
   var W = getTableWidths();
   var header = formatVsHeader(W.COL1) + ' | ' + padRight('Scheduled', W.COL2) + ' | ' + padRight('Shoutcaster', W.COL3);
   var sep = Array(header.length + 1).join('-');
 
-  var rendered = _renderDivisionTableSafely_(division, week, store);
-  var rows = _extractTableRows_(rendered);
+  var rendered = renderDivisionTableSafely(division, week, store);
+  var rows = extractTableRows(rendered);
   if (!rows.length) return ''; // no rows in this division
 
   // Re-parse existing lines into (home, away, sched, cast) and reformat with centered vs
@@ -266,7 +266,7 @@ function renderDivisionCurrentTable_(division, week, store, mapName) {
   return [title, '```', header, sep].concat(outRows).concat(['```']).join('\n');
 }
 
-function _renderDivisionTableSafely_(division, week, store) {
+function renderDivisionTableSafely(division, week, store) {
   if (typeof renderDivisionTableBody_ !== 'function') return '';
   try { return renderDivisionTableBody_(division, week, store) || ''; }
   catch (_) { try { return renderDivisionTableBody_(week, store, division) || ''; } catch (e) { return ''; } }
@@ -274,7 +274,7 @@ function _renderDivisionTableSafely_(division, week, store) {
 
 // Extract ONLY the data rows from a rendered division table's code fence
 // Keeps the inner padded lines (so alignment remains perfect).
-function _extractTableRows_(rendered) {
+function extractTableRows(rendered) {
   if (!rendered) return [];
   var s = String(rendered);
   var i1 = s.indexOf('```'); if (i1 < 0) return [];
@@ -298,7 +298,7 @@ function _extractTableRows_(rendered) {
 
 
 /** Render the weekly header embed payload for a given `week` object. */
-function renderHeaderEmbedPayload_(week) {
+function renderHeaderEmbedPayload(week) {
   var tz = week.tz || getTimezone();
   var wkKey = String(week.weekKey || '');
   var mapRef = String(week.mapRef || '');
@@ -341,7 +341,7 @@ function renderHeaderEmbedPayload_(week) {
  * and ONE Discord message body for rematches (if they exist) grouped by map then division
  * Returns [string] or [] if nothing to post.
  */
-function renderTablesPages_(week, store) {
+function renderTablesPages(week, store) {
   var chunks = [];
 
   var divs = (typeof getDivisionSheets === 'function')
@@ -354,24 +354,24 @@ function renderTablesPages_(week, store) {
     var top = (typeof resolveDivisionBlockTop === 'function') ? resolveDivisionBlockTop(div, week) : 0;
     if (!top) continue;
 
-    var matches = (typeof getMatchesForDivisionWeek_ === 'function') ? getMatchesForDivisionWeek_(div, top) : [];
+    var matches = (typeof getMatchesForDivisionWeek === 'function') ? getMatchesForDivisionWeek(div, top) : [];
     if (!matches || !matches.length) continue;
 
-    var block = (typeof renderDivisionWeekTable_ === 'function')
-      ? renderDivisionWeekTable_(div, matches, div) : '';
+    var block = (typeof renderDivisionWeekTable === 'function')
+      ? renderDivisionWeekTable(div, matches, div) : '';
     if (block && /\S/.test(block)) chunks.push(block);
   }
 
-  // inside renderTablesPages_(week, store) AFTER the three current week tables:
-  var makeupsArr = (typeof getMakeupMatchesAllDivs_ === 'function') ? getMakeupMatchesAllDivs_(week) : [];
-  var remBody = (typeof renderRematchesTableBody_ === 'function') ? renderRematchesTableBody_(makeupsArr) : '';
+  // inside renderTablesPages(week, store) AFTER the three current week tables:
+  var makeupsArr = (typeof getMakeupMatchesAllDivs === 'function') ? getMakeupMatchesAllDivs(week) : [];
+  var remBody = (typeof renderRematchesTableBody === 'function') ? renderRematchesTableBody(makeupsArr) : '';
 
   // IFF No Rematches Table, post this
   if (!remBody || !/\S/.test(remBody)) { weeklyBody += EMOJI_KTP + '\n\n_No rematches pending for this week._' + EMOJI_KTP; }
 
   var full = (chunks.join('\n\n') || '').trim();
   if (!full) {
-    try { sendLog_ && sendLog_('renderTablesPages_: empty-composition'); } catch (_) { }
+    try { sendLog && sendLog('renderTablesPages: empty-composition'); } catch (_) { }
     return [];
   }
   return [full];
@@ -385,7 +385,7 @@ function renderTablesPages_(week, store) {
  *  3) If still empty, try alternate column pairs (C/G, B/F, D/H)
  * Always uses your width helpers to match formatting.
  */
-function renderDivisionWeekTable_(division, week) {
+function renderDivisionWeekTable(division, week) {
   var sh = getSheetByName(division);
   if (!sh) return '';
 
@@ -439,7 +439,7 @@ function renderDivisionWeekTable_(division, week) {
  * Join Bronze, Silver, Gold pretty tables into ONE body (plain content).
  * Expects renderDivisionWeekTablePretty_(division, matches, label) to return a fenced block.
  */
-function renderWeeklyTablesBody_(week) {
+function renderWeeklyTablesBody(week) {
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var chunks = [];
 
@@ -448,10 +448,10 @@ function renderWeeklyTablesBody_(week) {
     var top = (typeof resolveDivisionBlockTop === 'function') ? resolveDivisionBlockTop(div, week) : 0;
     if (!top) continue;
 
-    var matches = (typeof getMatchesForDivisionWeek_ === 'function') ? getMatchesForDivisionWeek_(div, top) : [];
+    var matches = (typeof getMatchesForDivisionWeek === 'function') ? getMatchesForDivisionWeek(div, top) : [];
     if (!matches || !matches.length) continue;
 
-    var block = (typeof renderDivisionWeekTable_ === 'function') ? renderDivisionWeekTable_(div, matches, div) : '';
+    var block = (typeof renderDivisionWeekTable === 'function') ? renderDivisionWeekTable(div, matches, div) : '';
     if (block && /\S/.test(block)) chunks.push(block);
   }
 
@@ -462,8 +462,8 @@ function renderWeeklyTablesBody_(week) {
  * Single combined rematches table (one code fence).
  * Grouped by map → division; banner lines centered on the first '|' divider.
  */
-function renderRematchesTableBody_() {
-  var makeups = getMakeupMatchesAllDivs_();
+function renderRematchesTableBody() {
+  var makeups = getMakeupMatchesAllDivs();
   makeups = Array.isArray(makeups) ? makeups.slice() : [];
   if (!makeups.length) return '';
 

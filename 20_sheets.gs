@@ -15,13 +15,13 @@
 // - weekKey(week)
 // - getAllBlocks(sh)
 // - resolveDivisionBlockTop(division, week)
-// - blockIndexForTop_(sheet, topRow)
-// - _readA_(sheet, row)
-// - getAlignedUpcomingWeekOrReport_()
-// - deriveWeekMetaFromDivisionTop_(division, top)
-// - syncHeaderMetaToTables_(week, canonDiv)
-// - getMatchesForDivisionWeek_(division, top)
-// - getMakeupMatchesAllDivs_(week)
+// - blockIndexForTop(sheet, topRow)
+// - readA(sheet, row)
+// - getAlignedUpcomingWeekOrReport()
+// - deriveWeekMetaFromDivisionTop(division, top)
+// - syncHeaderMetaToTables(week, canonDiv)
+// - getMatchesForDivisionWeek(division, top)
+// - getMakeupMatchesAllDivs(week)
 //
 // Total: 17 functions
 // =======================
@@ -195,7 +195,7 @@ function resolveDivisionBlockTop(division, week) {
 }
 
 /** Determine the block index (0-based) for the block starting at `topRow` in `sheet`. */
-function blockIndexForTop_(sheet, topRow) {
+function blockIndexForTop(sheet, topRow) {
   const blocks = getAllBlocks(sheet) || [];
   if (!blocks.length) return 0;
   let idx = 0;
@@ -212,7 +212,7 @@ function blockIndexForTop_(sheet, topRow) {
 }
 
 /** Safe read of column A at a given row (returns trimmed display value or ''). */
-function _readA_(sheet, row) {
+function readA(sheet, row) {
   try {
     return String(sheet.getRange('A' + row).getDisplayValue() || '').trim();
   } catch (e) {
@@ -220,7 +220,7 @@ function _readA_(sheet, row) {
   }
 }
 
-function getAlignedUpcomingWeekOrReport_() {
+function getAlignedUpcomingWeekOrReport() {
   var G = gridMeta(); var gold = getSheetByName('Gold');
   if (!gold) throw new Error('Sheet "Bronze" not found');
   var idx = findActiveIndexByDate(gold);
@@ -246,7 +246,7 @@ function getAlignedUpcomingWeekOrReport_() {
 }
 
 // Pull meta for a division from its block header row (top = header row: A27/A38/A49…)
-function deriveWeekMetaFromDivisionTop_(division, top) {
+function deriveWeekMetaFromDivisionTop(division, top) {
   var sh = (typeof getSheetByName === 'function') ? getSheetByName(division) : null;
   if (!sh || !top) return null;
   var tz = 'America/New_York';
@@ -274,7 +274,7 @@ function deriveWeekMetaFromDivisionTop_(division, top) {
  * block as your current tables. Uses Bronze as canonical, unless you pass another division.
  * Also re-populates week.blocks so all divisions share this top.
  */
-function syncHeaderMetaToTables_(week, canonicalDivision) {
+function syncHeaderMetaToTables(week, canonicalDivision) {
   week = week || {};
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var canon = canonicalDivision || divs[0] || 'Bronze';
@@ -282,7 +282,7 @@ function syncHeaderMetaToTables_(week, canonicalDivision) {
   var top = (typeof resolveDivisionBlockTop === 'function') ? resolveDivisionBlockTop(canon, week) : 0;
   if (!top) return week; // nothing to do
 
-  var meta = deriveWeekMetaFromDivisionTop_(canon, top);
+  var meta = deriveWeekMetaFromDivisionTop(canon, top);
   if (!meta) return week;
 
   week.seasonWeekTitle = meta.label || week.seasonWeekTitle || '';
@@ -304,7 +304,7 @@ function syncHeaderMetaToTables_(week, canonicalDivision) {
  * top = header row (A27/A38/…); grid is rows (top+1 .. top+10), cols B..H.
  * Uses C/G for names; skips BYE/blank rows.
  */
-function getMatchesForDivisionWeek_(division, top) {
+function getMatchesForDivisionWeek(division, top) {
   var sh = (typeof getDivisionSheet_ === 'function') ? getDivisionSheet_(division)
     : (typeof getSheetByName === 'function') ? getSheetByName(division)
       : null;
@@ -355,7 +355,7 @@ function getMatchesForDivisionWeek_(division, top) {
  * @param {Object=} week optional; not required (date/map not used here)
  * @return {Array<Object>} [{ division, mapRef, home, away, date, dateIso, weekLabel }]
  */
-function getMakeupMatchesAllDivs_(week) {
+function getMakeupMatchesAllDivs(week) {
   var tz = 'America/New_York';
 
   // Grid constants for your sheet

@@ -6,25 +6,25 @@
 // Used by: 40_logging.gs, 50_rendering.gs, 60_parser.gs
 //
 // Functions in this module:
-// - _sp_(k, dflt)
-// - getRelayBase_()
-// - getRelayPaths_()
-// - getRelayHeaders_()
-// - _normalizeRelayUrl_(path)
-// - getRelayTimeoutMs_()
-// - relayFetch_(path, opt)
-// - tryParseJson_(s)
-// - handleIncomingDiscordEvent_(payload)
-// - contentFromRelay_(payload)
-// - _textFromEmbeds_(embeds)
-// - _fetchSingleMessageInclusive_(channelId, messageId)
-// - fetchChannelMessages_(channelId, params)
-// - fetchMessageById_(channelId, messageId)
-// - postChannelMessage_(channelId, content)
-// - postChannelMessageAdvanced_(channelId, content, embeds)
-// - editChannelMessage_(channelId, messageId, newContent)
-// - editChannelMessageAdvanced_(channelId, messageId, content, embeds)
-// - deleteMessage_(channelId, messageId)
+// - sp(k, dflt)
+// - getRelayBase()
+// - getRelayPaths()
+// - getRelayHeaders()
+// - normalizeRelayUrl(path)
+// - getRelayTimeoutMs()
+// - relayFetch(path, opt)
+// - tryParseJson(s)
+// - handleIncomingDiscordEvent(payload)
+// - contentFromRelay(payload)
+// - textFromEmbeds(embeds)
+// - fetchSingleMessageInclusive(channelId, messageId)
+// - fetchChannelMessages(channelId, params)
+// - fetchMessageById(channelId, messageId)
+// - postChannelMessage(channelId, content)
+// - postChannelMessageAdvanced(channelId, content, embeds)
+// - editChannelMessage(channelId, messageId, newContent)
+// - editChannelMessageAdvanced(channelId, messageId, content, embeds)
+// - deleteMessage(channelId, messageId)
 //
 // Total: 19 functions
 // =======================
@@ -35,17 +35,17 @@
    Relay base / headers / fetch
    ========================= */
 /** Script Property helper */
-function _sp_(k, dflt) {
+function sp(k, dflt) {
   var v = PropertiesService.getScriptProperties().getProperty(k);
   return (v != null && v !== '') ? String(v) : (dflt == null ? '' : String(dflt));
 }
 
 /** Relay base URL (no trailing slash) */
-function getRelayBase_() {
+function getRelayBase() {
   var cands = [
-    _sp_('RELAY_BASE'),
-    _sp_('DISCORD_RELAY_BASE'),
-    _sp_('WM_RELAY_BASE_URL'),
+    sp('RELAY_BASE'),
+    sp('DISCORD_RELAY_BASE'),
+    sp('WM_RELAY_BASE_URL'),
     (typeof RELAY_BASE !== 'undefined' ? RELAY_BASE : ''),
     (typeof DISCORD_RELAY_BASE !== 'undefined' ? DISCORD_RELAY_BASE : ''),
     (typeof WM_RELAY_BASE_URL !== 'undefined' ? WM_RELAY_BASE_URL : '')
@@ -57,27 +57,27 @@ function getRelayBase_() {
   throw new Error('Relay base URL missing (set RELAY_BASE).');
 }
 
-function getRelayPaths_() {
+function getRelayPaths() {
   var paths = {
-    messages: _sp_('RELAY_PATH_MESSAGES', '/messages'),
-    message: _sp_('RELAY_PATH_MESSAGE', '/message'),     // used as /message/:channelId/:messageId
-    reply: _sp_('RELAY_PATH_REPLY', '/reply'),       // your server.js
-    post: _sp_('RELAY_PATH_POST', '/reply'),       // synonym (old code may use "post")
-    edit: _sp_('RELAY_PATH_EDIT', '/edit'),
-    del: _sp_('RELAY_PATH_DELETE', '/delete'),      // used as /delete/:channelId/:messageId
-    dm: _sp_('RELAY_PATH_DM', '/dm'),
-    react: _sp_('RELAY_PATH_REACT', '/react'),
-    health: _sp_('RELAY_PATH_HEALTH', '/health'),
-    whoami: _sp_('RELAY_PATH_WHOAMI', '/whoami')
+    messages: sp('RELAY_PATH_MESSAGES', '/messages'),
+    message: sp('RELAY_PATH_MESSAGE', '/message'),     // used as /message/:channelId/:messageId
+    reply: sp('RELAY_PATH_REPLY', '/reply'),       // your server.js
+    post: sp('RELAY_PATH_POST', '/reply'),       // synonym (old code may use "post")
+    edit: sp('RELAY_PATH_EDIT', '/edit'),
+    del: sp('RELAY_PATH_DELETE', '/delete'),      // used as /delete/:channelId/:messageId
+    dm: sp('RELAY_PATH_DM', '/dm'),
+    react: sp('RELAY_PATH_REACT', '/react'),
+    health: sp('RELAY_PATH_HEALTH', '/health'),
+    whoami: sp('RELAY_PATH_WHOAMI', '/whoami')
   };
   return paths;
 }
 
 /** Build headers for talking to the relay (adds shared secret in common formats). */
-function getRelayHeaders_() {
+function getRelayHeaders() {
   var secret =
-    _sp_('RELAY_AUTH') ||
-    _sp_('WM_RELAY_SHARED_SECRET') ||
+    sp('RELAY_AUTH') ||
+    sp('WM_RELAY_SHARED_SECRET') ||
     (typeof RELAY_AUTH !== 'undefined' ? RELAY_AUTH : '') ||
     (typeof WM_RELAY_SHARED_SECRET !== 'undefined' ? WM_RELAY_SHARED_SECRET : '');
   var h = { 'Content-Type': 'application/json' };
@@ -86,19 +86,19 @@ function getRelayHeaders_() {
 }
 
 /** Normalize a path/URL. Accepts absolute URLs or relative paths. */
-function _normalizeRelayUrl_(path) {
+function normalizeRelayUrl(path) {
   if (typeof path !== 'string' || !path) {
-    throw new Error('relayFetch_: path is missing or not a string');
+    throw new Error('relayFetch: path is missing or not a string');
   }
   // If caller passed a full URL, use as-is
   if (/^https?:\/\//i.test(path)) return path;
-  var base = getRelayBase_();
+  var base = getRelayBase();
   return base + (path.charAt(0) === '/' ? path : ('/' + path));
 }
 
 
 /** Optional: central place to tune timeouts for relay calls. */
-function getRelayTimeoutMs_() {
+function getRelayTimeoutMs() {
   // Default 20s; adjust if your Cloud Run/Functions are slower
   var sp = PropertiesService.getScriptProperties();
   var v = sp.getProperty('RELAY_TIMEOUT_MS');
@@ -107,15 +107,15 @@ function getRelayTimeoutMs_() {
 }
 
 /** Fetch wrapper */
-function relayFetch_(path, opt) {
+function relayFetch(path, opt) {
   opt = opt || {};
-  var url = _normalizeRelayUrl_(path);
+  var url = normalizeRelayUrl(path);
 
   var params = {
     method: (opt.method || 'get').toLowerCase(),
-    headers: Object.assign({}, getRelayHeaders_(), (opt.headers || {})),
+    headers: Object.assign({}, getRelayHeaders(), (opt.headers || {})),
     muteHttpExceptions: true,
-    timeout: (function () { var n = parseInt(_sp_('RELAY_TIMEOUT_MS', '20000'), 10); return isNaN(n) ? 20000 : Math.max(5000, n); })()
+    timeout: (function () { var n = parseInt(sp('RELAY_TIMEOUT_MS', '20000'), 10); return isNaN(n) ? 20000 : Math.max(5000, n); })()
   };
 
   if (opt.method && /post|put|patch|delete/i.test(opt.method) && typeof opt.payload !== 'undefined') {
@@ -127,21 +127,21 @@ function relayFetch_(path, opt) {
   var code = res.getResponseCode();
   var body = res.getContentText() || '';
   if (code < 200 || code >= 300) {
-    throw new Error('relayFetch_ HTTP ' + code + ' for ' + url + ': ' + body);
+    throw new Error('relayFetch HTTP ' + code + ' for ' + url + ': ' + body);
   }
   try { return JSON.parse(body); } catch (_) { return body; }
 }
 
 /** Parse JSON text safely (returns null on failure). */
-function tryParseJson_(s) {
+function tryParseJson(s) {
   if (!s) return null;
   try { return JSON.parse(s); } catch (e) { return null; }
 }
 
 // ---------- RELAY API WRAPPERS ----------
 
-function handleIncomingDiscordEvent_(payload) {
-  var text = contentFromRelay_(payload);
+function handleIncomingDiscordEvent(payload) {
+  var text = contentFromRelay(payload);
   if (!text) return { ok: false, error: 'empty' };
 
   var parsed = parseScheduleMessage_v3(text); // your parser
@@ -151,12 +151,12 @@ function handleIncomingDiscordEvent_(payload) {
   var groups = {};
   parsed.pairs.forEach(function (p) { (groups[p.weekKey] = groups[p.weekKey] || []).push(p); });
   for (var wk in groups) {
-    updateTablesMessageFromPairs_(wk, groups[wk]);
+    updateTablesMessageFromPairs(wk, groups[wk]);
   }
   return { ok: true };
 }
 
-function contentFromRelay_(payload) {
+function contentFromRelay(payload) {
   if (payload == null) return '';
 
   // Fast path: already a string
@@ -176,7 +176,7 @@ function contentFromRelay_(payload) {
 
   // 2) Embeds (title/description/fields) if no or minimal content
   if ((!parts.length || isJustPings(parts.join(' '))) && Array.isArray(msg.embeds) && msg.embeds.length) {
-    parts.push(_textFromEmbeds_(msg.embeds));
+    parts.push(textFromEmbeds(msg.embeds));
   }
 
   // 3) Referenced (reply) message content, if present
@@ -210,7 +210,7 @@ function contentFromRelay_(payload) {
 }
 
 /* ----------------------- helpers ----------------------- */
-function _textFromEmbeds_(embeds) {
+function textFromEmbeds(embeds) {
   var out = [];
   for (var i = 0; i < embeds.length; i++) {
     var e = embeds[i] || {};
@@ -233,18 +233,18 @@ function _textFromEmbeds_(embeds) {
 
 /* ----------------------- Fetch ----------------------- */
 
-function _fetchSingleMessageInclusive_(channelId, messageId) {
+function fetchSingleMessageInclusive(channelId, messageId) {
   // 1) Try a dedicated single-message endpoint
-  if (typeof fetchMessageById_ === 'function') {
+  if (typeof fetchMessageById === 'function') {
     try {
-      var m = fetchMessageById_(channelId, messageId);
+      var m = fetchMessageById(channelId, messageId);
       if (m && m.id) return m;
     } catch (e) { }
   }
 
   // 2) Try "around" if your relay supports it
   try {
-    var aroundPage = fetchChannelMessages_(channelId, { around: String(messageId), limit: 1 }) || [];
+    var aroundPage = fetchChannelMessages(channelId, { around: String(messageId), limit: 1 }) || [];
     for (var i = 0; i < aroundPage.length; i++) {
       if (String(aroundPage[i].id) === String(messageId)) return aroundPage[i];
     }
@@ -254,7 +254,7 @@ function _fetchSingleMessageInclusive_(channelId, messageId) {
   try {
     var prev = decStringMinusOne(String(messageId));
     if (prev) {
-      var maybe = fetchChannelMessages_(channelId, { after: prev, limit: 1 }) || [];
+      var maybe = fetchChannelMessages(channelId, { after: prev, limit: 1 }) || [];
       for (var j = 0; j < maybe.length; j++) {
         if (String(maybe[j].id) === String(messageId)) return maybe[j];
       }
@@ -264,70 +264,70 @@ function _fetchSingleMessageInclusive_(channelId, messageId) {
   return null;
 }
 
-function fetchChannelMessages_(channelId, params) {
+function fetchChannelMessages(channelId, params) {
   params = params || {};
-  var p = getRelayPaths_();
+  var p = getRelayPaths();
   var qs = 'channelId=' + encodeURIComponent(channelId);
   if (params.after) qs += '&after=' + encodeURIComponent(params.after);
   if (params.around) qs += '&around=' + encodeURIComponent(params.around);
   if (params.limit) qs += '&limit=' + encodeURIComponent(params.limit);
-  return relayFetch_(p.messages + '?' + qs, { method: 'get' }) || [];
+  return relayFetch(p.messages + '?' + qs, { method: 'get' }) || [];
 }
 
-function fetchMessageById_(channelId, messageId) {
-  var p = getRelayPaths_();
+function fetchMessageById(channelId, messageId) {
+  var p = getRelayPaths();
   var path = (p.message || '/message') + '/' + encodeURIComponent(channelId) + '/' + encodeURIComponent(messageId);
-  var obj = relayFetch_(path, { method: 'get' });
+  var obj = relayFetch(path, { method: 'get' });
   return (obj && obj.id) ? obj : null;
 }
 
 /* ----------------------- Post ----------------------- */
 
 /** POST text message */
-function postChannelMessage_(channelId, content) {
-  var p = getRelayPaths_();
+function postChannelMessage(channelId, content) {
+  var p = getRelayPaths();
   var path = p.reply || p.post || '/reply';
   var payload = { channelId: String(channelId), content: String(content || '') };
-  var res = relayFetch_(path, { method: 'post', payload: payload }) || {};
+  var res = relayFetch(path, { method: 'post', payload: payload }) || {};
   var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
-  if (!id) try { logLocal('WARN', 'postChannelMessage_ no id', { res: res }); } catch (_) { }
+  if (!id) try { logLocal('WARN', 'postChannelMessage no id', { res: res }); } catch (_) { }
   return id;
 }
 
-function postChannelMessageAdvanced_(channelId, content, embeds) {
-  var p = getRelayPaths_();
+function postChannelMessageAdvanced(channelId, content, embeds) {
+  var p = getRelayPaths();
   var path = p.reply || p.post || '/reply';
   var payload = { channelId: String(channelId), content: String(content || ''), embeds: embeds || [] };
-  var res = relayFetch_(path, { method: 'post', payload: payload }) || {};
+  var res = relayFetch(path, { method: 'post', payload: payload }) || {};
   var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
-  if (!id) try { logLocal('WARN', 'postChannelMessageAdvanced_ no id', { res: res }); } catch (_) { }
+  if (!id) try { logLocal('WARN', 'postChannelMessageAdvanced no id', { res: res }); } catch (_) { }
   return id;
 }
 
 /* ----------------------- Edit ----------------------- */
-function editChannelMessage_(channelId, messageId, newContent) {
-  var p = getRelayPaths_();
+function editChannelMessage(channelId, messageId, newContent) {
+  var p = getRelayPaths();
   var path = p.edit || '/edit';
   var payload = { channelId: String(channelId), messageId: String(messageId), content: String(newContent || '') };
-  var res = relayFetch_(path, { method: 'post', payload: payload }) || {};
+  var res = relayFetch(path, { method: 'post', payload: payload }) || {};
   var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
   return id || String(messageId);
 }
 
-function editChannelMessageAdvanced_(channelId, messageId, content, embeds) {
-  var p = getRelayPaths_();
+function editChannelMessageAdvanced(channelId, messageId, content, embeds) {
+  var p = getRelayPaths();
   var path = p.edit || '/edit';
   var payload = { channelId: String(channelId), messageId: String(messageId), content: String(content || ''), embeds: embeds || [] };
-  var res = relayFetch_(path, { method: 'post', payload: payload }) || {};
+  var res = relayFetch(path, { method: 'post', payload: payload }) || {};
   var id = (res && res.id) ? String(res.id) : (res && res.data && res.data.id ? String(res.data.id) : '');
   return id || String(messageId);
 }
 
 /* ----------------------- Delete ----------------------- */
-function deleteMessage_(channelId, messageId) {
-  var p = getRelayPaths_();
+function deleteMessage(channelId, messageId) {
+  var p = getRelayPaths();
   var base = p.del || '/delete';
   var path = base + '/' + encodeURIComponent(channelId) + '/' + encodeURIComponent(messageId);
-  var res = relayFetch_(path, { method: 'delete' }) || {};
+  var res = relayFetch(path, { method: 'delete' }) || {};
   return !(res && res.ok === false);
 }

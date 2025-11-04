@@ -6,17 +6,17 @@
 // Used by: 30_relay.gs (event handlers), 60_parser.gs
 //
 // Functions in this module:
-// - updateTablesMessageFromPairs_(weekKey, pairs)
-// - _weekFromKey_(wkKey)
-// - _canonDivision_(d)
-// - _ensureStoreShape_(store)
-// - _findMatchRowIndex_(division, top, home, away)
+// - updateTablesMessageFromPairs(weekKey, pairs)
+// - weekFromKey(wkKey)
+// - canonDivision(d)
+// - ensureStoreShape(store)
+// - findMatchRowIndex(division, top, home, away)
 //
 // Total: 5 functions
 // =======================
 
 /** Parse "YYYY-MM-DD|map" into a week object with a real Date in local ET. */
-function _weekFromKey_(wkKey) {
+function weekFromKey(wkKey) {
   var parts = String(wkKey || '').split('|');
   var iso = parts[0] || '';
   var mapRef = parts[1] || '';
@@ -26,7 +26,7 @@ function _weekFromKey_(wkKey) {
 }
 
 /** Canonicalize division label. */
-function _canonDivision_(d) {
+function canonDivision(d) {
   if (!d) return '';
   var s = String(d).trim().toLowerCase();
   if (s === 'bronze' || s === 'b') return 'Bronze';
@@ -37,7 +37,7 @@ function _canonDivision_(d) {
 }
 
 /** Ensure the week store has expected shape. */
-function _ensureStoreShape_(store) {
+function ensureStoreShape(store) {
   if (!store || typeof store !== 'object') return;
   if (!store.meta) store.meta = {};
   if (!store.sched) store.sched = {};   // per-division scheduled rows: { [div]: { [rowIndex]: {epochSec?, whenText, home, away} } }
@@ -49,10 +49,10 @@ function _ensureStoreShape_(store) {
  * - top is the header row (A27/A38/…), grid is rows (top+1..top+10)
  * - compares names in C (home) and G (away)
  */
-function _findMatchRowIndex_(division, top, home, away) {
+function findMatchRowIndex(division, top, home, away) {
   var sh = (typeof getSheetByName_ === 'function') ? getSheetByName_(division) : null;
   if (!sh) {
-    if (typeof sendLog_ === 'function') sendLog_(`🔍 _findMatchRowIndex_: sheet not found for ${division}`);
+    if (typeof sendLog === 'function') sendLog(`🔍 findMatchRowIndex: sheet not found for ${division}`);
     return -1;
   }
 
@@ -66,9 +66,9 @@ function _findMatchRowIndex_(division, top, home, away) {
   var nh = norm(home), na = norm(away);
 
   // Diagnostic logging
-  if (typeof sendLog_ === 'function') {
-    sendLog_(`🔍 Finding match: "${home}" vs "${away}" → normalized: "${nh}" vs "${na}"`);
-    sendLog_(`🔍 Searching ${division} rows ${gridStartRow}-${gridStartRow + rows - 1} (block top: ${top})`);
+  if (typeof sendLog === 'function') {
+    sendLog(`🔍 Finding match: "${home}" vs "${away}" → normalized: "${nh}" vs "${na}"`);
+    sendLog(`🔍 Searching ${division} rows ${gridStartRow}-${gridStartRow + rows - 1} (block top: ${top})`);
   }
 
   // Exact match first
@@ -77,13 +77,13 @@ function _findMatchRowIndex_(division, top, home, away) {
     var ch = norm(r[1]); // C (home)
     var ca = norm(r[5]); // G (away)
 
-    if (i < 3 && typeof sendLog_ === 'function') {
+    if (i < 3 && typeof sendLog === 'function') {
       // Log first 3 rows for debugging
-      sendLog_(`🔍 Row ${i}: sheet="${r[1]}" vs "${r[5]}" → normalized: "${ch}" vs "${ca}"`);
+      sendLog(`🔍 Row ${i}: sheet="${r[1]}" vs "${r[5]}" → normalized: "${ch}" vs "${ca}"`);
     }
 
     if (ch && ca && ch === nh && ca === na) {
-      if (typeof sendLog_ === 'function') sendLog_(`✅ Exact match found at row ${i}`);
+      if (typeof sendLog === 'function') sendLog(`✅ Exact match found at row ${i}`);
       return i;
     }
   }
@@ -100,12 +100,12 @@ function _findMatchRowIndex_(division, top, home, away) {
   }
 
   if (candidates.length === 1) {
-    if (typeof sendLog_ === 'function') sendLog_(`✅ Fuzzy match found at row ${candidates[0]}`);
+    if (typeof sendLog === 'function') sendLog(`✅ Fuzzy match found at row ${candidates[0]}`);
     return candidates[0];
   }
 
-  if (typeof sendLog_ === 'function') {
-    sendLog_(`❌ No match found. Candidates: ${candidates.length}`);
+  if (typeof sendLog === 'function') {
+    sendLog(`❌ No match found. Candidates: ${candidates.length}`);
   }
 
   return -1;
@@ -117,7 +117,7 @@ function _findMatchRowIndex_(division, top, home, away) {
  * @param {Array<Object>} pairs  [{division, home, away, whenText, epochSec? , weekKey?}, ...]
  * @returns {{ok:boolean, weekKey:string, updated:number, unmatched:Array, store:any}}
  */
-function updateTablesMessageFromPairs_(weekKey, pairs) {
+function updateTablesMessageFromPairs(weekKey, pairs) {
   // --- 0) Normalize inputs
   pairs = Array.isArray(pairs) ? pairs : [];
   if (!weekKey) {
@@ -125,20 +125,20 @@ function updateTablesMessageFromPairs_(weekKey, pairs) {
     weekKey = (pairs[0] && pairs[0].weekKey) ? String(pairs[0].weekKey) : '';
   }
   if (!weekKey || weekKey.indexOf('|') < 0) {
-    throw new Error('updateTablesMessageFromPairs_: missing/invalid weekKey');
+    throw new Error('updateTablesMessageFromPairs: missing/invalid weekKey');
   }
 
   // --- 1) Derive a "week" object from weekKey (YYYY-MM-DD|map)
-  var wkMeta = _weekFromKey_(weekKey);          // {date, mapRef, weekKey}
+  var wkMeta = weekFromKey(weekKey);          // {date, mapRef, weekKey}
   // Allow the sheet to align blocks/canonical division tops etc.
-  if (typeof syncHeaderMetaToTables_ === 'function') {
+  if (typeof syncHeaderMetaToTables === 'function') {
     // Use Gold (or Bronze) as canonical to ensure blocks map is present
-    wkMeta = syncHeaderMetaToTables_(wkMeta, 'Gold');
+    wkMeta = syncHeaderMetaToTables(wkMeta, 'Gold');
   }
 
   // --- 2) Load the store, ensure shape
   var store = (typeof loadWeekStore_ === 'function') ? (loadWeekStore_(weekKey) || {}) : {};
-  _ensureStoreShape_(store);
+  ensureStoreShape(store);
 
   // --- 3) For each pair, locate row inside the division's block and persist schedule
   var updated = 0;
@@ -146,7 +146,7 @@ function updateTablesMessageFromPairs_(weekKey, pairs) {
 
   for (var i = 0; i < pairs.length; i++) {
     var p = pairs[i] || {};
-    var div = _canonDivision_(p.division);
+    var div = canonDivision(p.division);
     var home = String(p.home || '').trim();
     var away = String(p.away || '').trim();
     if (!div || !home || !away) { unmatched.push({ reason: 'bad_input', pair: p }); continue; }
@@ -159,7 +159,7 @@ function updateTablesMessageFromPairs_(weekKey, pairs) {
       continue;
     }
 
-    var rowIndex = _findMatchRowIndex_(div, top, home, away); // 0..9 or -1
+    var rowIndex = findMatchRowIndex(div, top, home, away); // 0..9 or -1
     if (rowIndex < 0) {
       unmatched.push({ reason: 'row_not_found', division: div, pair: p });
       continue;

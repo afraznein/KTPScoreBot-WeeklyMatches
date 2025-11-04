@@ -11,31 +11,31 @@
  * CHANGELOG:
  * v3.2.0 (2025-11-04) - FEATURE: Added back-processing capability for matches without map keys
  *                     - Added server_backprocessMatch() endpoint in 50_webapp.gs
- *                     - Added _findMatchAcrossAllWeeks_() helper to search all weeks by teams
+ *                     - Added findMatchAcrossAllWeeks() helper to search all weeks by teams
  *                     - Supports scheduling matches based only on division + team names
  *                     - Automatically finds correct week/map from sheet data
  *                     - Useful for back-filling historical match schedules
  * v3.1.0 (2025-11-04) - PERFORMANCE: Added execution time monitoring and batch limits
- *                     - Added getRemainingTime_() helper in 05_util.gs
- *                     - Updated _pollAndProcessFromId_() with maxProcess limit (default 5)
+ *                     - Added getRemainingTime() helper in 05_util.gs
+ *                     - Updated pollAndProcessFromId() with maxProcess limit (default 5)
  *                     - Added time checks to prevent execution timeouts
  *                     - Messages now process in batches with graceful early exit
  *                     - Enhanced logging with execution stats (time used, messages processed)
- * v3.0.4 (2025-11-03) - CRITICAL: Fixed completely broken sendLog_() function
- *                     - Fixed logMatchToWMLog_() to actually write to WM_Log sheet
- *                     - Fixed logToWmSheet_() error handling
+ * v3.0.4 (2025-11-03) - CRITICAL: Fixed completely broken sendLog() function
+ *                     - Fixed logMatchToWMLog() to actually write to WM_Log sheet
+ *                     - Fixed logToWmSheet() error handling
  *                     - All logging to Google Sheets now working correctly
  *                     - Diagnostic logs will now appear in WM_LOG sheet
  * v3.0.3 (2025-11-03) - BUGFIX: Fixed formatWeeklyNotice_ function name (missing underscore)
- *                     - Added diagnostic logging to _findMatchRowIndex_ for troubleshooting
+ *                     - Added diagnostic logging to findMatchRowIndex for troubleshooting
  *                     - Logs show exact vs normalized team names for comparison
  *                     - Logs first 3 rows of each block for debugging
- * v3.0.2 (2025-11-03) - BUGFIX: Parser now calls updateTablesMessageFromPairs_() to find rows
+ * v3.0.2 (2025-11-03) - BUGFIX: Parser now calls updateTablesMessageFromPairs() to find rows
  *                     - Fixed "unmapped" matches - now properly locates match rows in sheets
  *                     - Added unmatched reason reporting (block_top_not_found, row_not_found)
  *                     - Store updates and Discord board refreshes now working
  * v3.0.1 (2025-11-02) - BUGFIX: Added missing getSheetByName_ function to 20_sheets.gs
- *                     - BUGFIX: Fixed relayPost_ call (replaced with postChannelMessage_)
+ *                     - BUGFIX: Fixed relayPost_ call (replaced with postChannelMessage)
  *                     - Fixed "Cannot read properties of null" error on sheet access
  *                     - Fixed "relayPost_ is not defined" error in parser
  * v3.0.0 (2025-11-02) - Major refactoring: Split 10main.gs into 8 focused modules

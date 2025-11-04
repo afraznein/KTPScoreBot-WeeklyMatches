@@ -24,11 +24,11 @@ function logVersionToDiscord() {
   const info = getVersionInfo();
   const msg = `🤖 **KTPScoreBot-WeeklyMatches** ${info.formatted} ready`;
 
-  // Use sendLog_ if available, otherwise post directly
-  if (typeof sendLog_ === 'function') {
-    sendLog_(msg);
-  } else if (typeof postChannelMessage_ === 'function' && typeof RESULTS_LOG_CHANNEL_ID !== 'undefined') {
-    postChannelMessage_(RESULTS_LOG_CHANNEL_ID, msg);
+  // Use sendLog if available, otherwise post directly
+  if (typeof sendLog === 'function') {
+    sendLog(msg);
+  } else if (typeof postChannelMessage === 'function' && typeof RESULTS_LOG_CHANNEL_ID !== 'undefined') {
+    postChannelMessage(RESULTS_LOG_CHANNEL_ID, msg);
   }
 }
 

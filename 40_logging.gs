@@ -6,13 +6,14 @@
 // Used by: 55_rendering.gs, 60_parser.gs, 70_updates.gs
 //
 // Functions in this module:
-// - sendLog_(msg)
-// - formatScheduleConfirmationLine_(parsed, row, authorId, msgId)
-// - logParsingSummary_(successCount, tentativeCount, sourceChannel)
-// - logMatchToWMLog_(entry, authorId, sourceChannel, isTentative, isRematch)
-// - logToWmSheet_(level, event, message, detailsObj)
+// - locLocal(level, event, data)
+// - sendLog(msg)
+// - formatScheduleConfirmationLine(parsed, row, authorId, msgId)
+// - logParsingSummary(successCount, tentativeCount, sourceChannel)
+// - logMatchToWMLog(entry, authorId, sourceChannel, isTentative, isRematch)
+// - logToWmSheet(level, event, message, detailsObj)
 //
-// Total: 5 functions
+// Total: 6 functions
 // =======================
 
 // ----- LOGGING -----
@@ -32,17 +33,17 @@ function logLocal(level, event, data) {
 function sendLog(msg) {
   // Send to Discord log channel
   try {
-    if (typeof postChannelMessage_ === 'function' && RESULTS_LOG_CHANNEL_ID) {
-      postChannelMessage_(RESULTS_LOG_CHANNEL_ID, msg);
+    if (typeof postChannelMessage === 'function' && RESULTS_LOG_CHANNEL_ID) {
+      postChannelMessage(RESULTS_LOG_CHANNEL_ID, msg);
     }
   } catch (e) {
-    console.error('sendLog_ Discord post failed:', e);
+    console.error('sendLog Discord post failed:', e);
   }
 
   // Write to WM_Log sheet
   try {
     if (!SPREADSHEET_ID) {
-      console.error('sendLog_: SPREADSHEET_ID not configured');
+      console.error('sendLog: SPREADSHEET_ID not configured');
       return;
     }
 
@@ -58,11 +59,11 @@ function sendLog(msg) {
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
     sh.appendRow([timestamp, 'INFO', String(msg)]);
   } catch (e) {
-    console.error('sendLog_ sheet write failed:', e);
+    console.error('sendLog sheet write failed:', e);
   }
 }
 
-function formatScheduleConfirmationLine_(parsed, row, authorId, msgId) {
+function formatScheduleConfirmationLine(parsed, row, authorId, msgId) {
   const mapShown = parsed.map || '?';
   const left = parsed.team1;
   const right = parsed.team2;
@@ -76,15 +77,15 @@ function formatScheduleConfirmationLine_(parsed, row, authorId, msgId) {
   return `${emoji} **${parsed.division}** • \`${mapShown}\` • ${rowBit} — **${left} vs ${right}** (${status})${by}${linkBit}`;
 }
 
-function logParsingSummary_(successCount, tentativeCount, sourceChannel) {
+function logParsingSummary(successCount, tentativeCount, sourceChannel) {
   const emoji = EMOJI_OK;
   const total = successCount + tentativeCount;
   const msg = `${emoji} Parsed ${total} matches (${successCount} scheduled, ${tentativeCount} tentative)` +
     (sourceChannel ? ` — from #${sourceChannel}` : '');
-  sendLog_(msg);
+  sendLog(msg);
 }
 
-function logMatchToWMLog_(entry, authorId, sourceChannel, isTentative, isRematch) {
+function logMatchToWMLog(entry, authorId, sourceChannel, isTentative, isRematch) {
   try {
     if (!SPREADSHEET_ID) return;
 
@@ -109,11 +110,11 @@ function logMatchToWMLog_(entry, authorId, sourceChannel, isTentative, isRematch
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
     sheet.appendRow([timestamp, div, map, teams, date, status, rowBit, authorBit, channelBit]);
   } catch (e) {
-    console.error('logMatchToWMLog_ failed:', e);
+    console.error('logMatchToWMLog failed:', e);
   }
 }
 
-function logToWmSheet_(level, event, message, detailsObj) {
+function logToWmSheet(level, event, message, detailsObj) {
   try {
     if (!SPREADSHEET_ID) return;
 
@@ -137,6 +138,6 @@ function logToWmSheet_(level, event, message, detailsObj) {
       detailsObj ? JSON.stringify(detailsObj) : ''
     ]);
   } catch (e) {
-    console.error('logToWmSheet_ failed:', e);
+    console.error('logToWmSheet failed:', e);
   }
 }

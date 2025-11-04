@@ -6,13 +6,13 @@
 // Used by: webapp endpoints
 //
 // Functions in this module:
-// - _saveTwitchForUser_(userId, twitchUrl)
+// - saveTwitchForUser(userId, twitchUrl)
 // - server_getTwitchUrl(secret, userId)
 //
 // Total: 2 functions
 // =======================
 
-function _saveTwitchForUser_(userId, twitchUrl) {
+function saveTwitchForUser(userId, twitchUrl) {
   const key = 'TWITCH_URL' + String(userId);
   _props_().setProperty(key, String(twitchUrl));
 }
