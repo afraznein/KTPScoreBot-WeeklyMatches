@@ -389,16 +389,19 @@ function server_postOrUpdate(secret) {
  * Processes all messages starting from and including the specified ID.
  * @param {string} secret - Authentication secret
  * @param {string} startId - Discord message ID to start from (inclusive)
+ * @param {boolean} [skipScheduled=false] - Skip matches that already have schedules
  * @returns {Object} {ok: true, data: {processed, updatedPairs, errors, lastPointer, tookMs}}
  */
-function server_startPollingFrom(secret, startId) {
+function server_startPollingFrom(secret, startId, skipScheduled) {
   try {
     checkSecret(secret);
     var channelId = PropertiesService.getScriptProperties().getProperty('SCHED_INPUT_CHANNEL_ID')
     if (!channelId) throw new Error('SCHED_INPUT_CHANNEL_ID is missing');
 
     var t0 = Date.now();
-    var summary = pollAndProcessFromId(channelId, String(startId), { inclusive: true });
+    var opts = { inclusive: true };
+    if (skipScheduled) opts.skipScheduled = true;
+    var summary = pollAndProcessFromId(channelId, String(startId), opts);
     summary.tookMs = Date.now() - t0;
     return ok(summary);
   } catch (e) {

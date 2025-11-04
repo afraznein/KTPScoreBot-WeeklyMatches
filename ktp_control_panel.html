@@ -265,6 +265,22 @@
         </div>
       </div>
 
+      <!-- Historical Parsing -->
+      <div class="card" style="grid-column: span 12;">
+        <h2>Historical Parsing</h2>
+        <div class="footer-note" style="margin-top: 0; margin-bottom: 10px;">
+          Bulk re-parse old Discord messages from captains. Uses message timestamps to match schedules to historical weeks. Useful for back-filling schedules from earlier in the season.
+        </div>
+        <div class="row">
+          <label for="histStartId">Start Message ID</label>
+          <input id="histStartId" type="text" placeholder="e.g. 1423841447026622534" />
+          <label><input id="skipScheduled" type="checkbox" checked /> Skip already-scheduled matches</label>
+        </div>
+        <div class="row">
+          <button id="btnHistParse" class="btn ok">Parse Historical Messages</button>
+        </div>
+      </div>
+
       <!-- Weekly Board -->
       <div class="card" style="grid-column: span 12;">
         <h2>Weekly Board</h2>
@@ -439,6 +455,32 @@
         setBusy(false);
       }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
       .server_startPolling(secret);
+    };
+
+    // Parse Historical Messages
+    $('btnHistParse').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      const id = $('histStartId').value.trim();
+      const skip = $('skipScheduled').checked;
+      if (!secret) { out('missing secret','err'); return; }
+      if (!/^\d{5,30}$/.test(id)) { out('invalid message id','err'); return; }
+      setBusy(true, 'Parsing historical messages…');
+      out('▶ Parse Historical Messages (skipScheduled=' + skip + ')…');
+      google.script.run.withSuccessHandler(res => {
+        if (res.ok) {
+          const d = res.data;
+          out('✅ Historical Parse Complete:\n' +
+            '  Processed: ' + (d.processed || 0) + ' messages\n' +
+            '  Updated: ' + (d.updated || 0) + ' schedules\n' +
+            '  Skipped: ' + (d.skipped || 0) + ' (already scheduled)\n' +
+            '  Errors: ' + (d.errors || 0) + '\n' +
+            '  Time: ' + (d.tookMs || 0) + 'ms', 'ok');
+        } else {
+          out('❌ ' + res.error, 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_startPollingFrom(secret, id, skip);
     };
 
     // Post / Update Weekly Board

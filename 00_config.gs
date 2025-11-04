@@ -20,13 +20,12 @@
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.3.0
+ * Version: 3.4.0
  * Last Updated: 2025-11-04
  *
  * CHANGELOG:
- *
+ * v3.4.0 (2025-11-04) - FEATURE: Fixed back process / historical parsing match feature implementation for current use case 
  * v3.3.0 (2025-11-04) - FEATURE: Full function refactor, JSDoc and summary headers across project file 
- *
  * v3.2.0 (2025-11-04) - FEATURE: Added back-processing capability for matches without map keys
  *                     - Added server_backprocessMatch() endpoint in 50_webapp.gs
  *                     - Added findMatchAcrossAllWeeks() helper to search all weeks by teams
@@ -68,7 +67,7 @@
  *                     - Automatic weekly board posting
  */
 
-const VERSION = '3.2.0';
+const VERSION = '3.4.0';
 const VERSION_DATE = '2025-11-04';
 
 // ---- DISCORD RELAY ----
@@ -110,6 +109,7 @@ const COL_MAP = 1;
 const COL_T1_RESULT = 2;  // Home W/L
 const COL_T1_NAME = 3;  // Home team name
 const COL_T1_SCORE = 4;
+const COL_SCHEDULED = 5;  // Scheduled time (E)
 const COL_T2_RESULT = 6;  // Away W/L
 const COL_T2_NAME = 7;  // Away team name
 const COL_T2_SCORE = 8;

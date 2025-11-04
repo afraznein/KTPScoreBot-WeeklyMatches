@@ -14,11 +14,12 @@
 //   matchTeam, scoreTeamMatch, parseWhenFlexible
 // Week matching logic:
 //   buildWeekListFromSheets, chooseWeekForPair, findWeekByMapAndPair
-//   findWeekByDateAndPair, findPastUnplayedWeekForPair, isSameWeek, hasTeamsInWeek
+//   findWeekByDateAndPair, findPastUnplayedWeekForPair, findWeekByMessageTime
+//   isSameWeek, hasTeamsInWeek
 // Message processing:
 //   pollAndProcessFromId, processOneDiscordMessage, parseScheduleMessage_v3
 //
-// Total: 23 functions
+// Total: 24 functions
 // =======================
 // parser.gs – Discord message parsing logic
 // =======================
@@ -429,29 +430,40 @@ function buildWeekListFromSheets() {
  * @param {string} hintMap - Optional map hint
  * @param {string} rawText - Original raw text for context clues
  * @param {Object} when - Optional when object {epochSec, whenText}
+ * @param {Date} messageDate - Optional Discord message timestamp for historical matching
  * @returns {Object} Week metadata object with weekKey, map, date, etc.
  */
-function chooseWeekForPair(division, home, away, weekList, hintMap, rawText, when) {
+function chooseWeekForPair(division, home, away, weekList, hintMap, rawText, when, messageDate) {
   var wk = (typeof getAlignedUpcomingWeekOrReport === 'function') ? getAlignedUpcomingWeekOrReport() : {};
   if (typeof syncHeaderMetaToTables === 'function') wk = syncHeaderMetaToTables(wk, division || 'Bronze');
 
+  // 1. Try map hint first (most explicit)
   if (hintMap) {
     var wByMap = findWeekByMapAndPair(division, hintMap, home, away, weekList);
     if (wByMap) return wByMap;
   }
 
+  // 2. Try date hint from parsed time
   if (when && typeof when.epochSec === 'number') {
     var d = new Date(when.epochSec * 1000);
     var wByDate = findWeekByDateAndPair(division, d, home, away, weekList);
     if (wByDate) return wByDate;
   }
 
+  // 3. Check for make-up keywords
   var lower = String(rawText || '').toLowerCase();
   if (/\b(make[- ]?up|postponed|rematch)\b/.test(lower)) {
     var wPast = findPastUnplayedWeekForPair(division, home, away, weekList);
     if (wPast) return wPast;
   }
 
+  // 4. NEW: Use message timestamp as fallback for historical parsing
+  if (messageDate && typeof findWeekByMessageTime === 'function') {
+    var wByMsgTime = findWeekByMessageTime(division, messageDate, home, away, weekList);
+    if (wByMsgTime) return wByMsgTime;
+  }
+
+  // 5. Final fallback: current week
   return wk;
 }
 
@@ -504,6 +516,62 @@ function findPastUnplayedWeekForPair(division, home, away, weekList) {
     if (hasTeamsInWeek(wk, home, away) && !wk.played) return wk;
   }
   return null;
+}
+
+/**
+ * Find week for a team pair based on Discord message timestamp.
+ * Looks for the closest upcoming week (or current week if message is same week as match).
+ * Used as fallback when message has no map/date hints.
+ * @param {string} division - Division name
+ * @param {Date} messageDate - Date when the Discord message was posted
+ * @param {string} home - Home team name
+ * @param {string} away - Away team name
+ * @param {Array} weekList - List of all weeks
+ * @returns {Object|null} Week object or null if not found
+ */
+function findWeekByMessageTime(division, messageDate, home, away, weekList) {
+  if (!Array.isArray(weekList) || !messageDate) return null;
+
+  var msgTime = messageDate.getTime();
+  var candidates = [];
+
+  // Find all weeks with this matchup in the division
+  for (var i = 0; i < weekList.length; i++) {
+    var wk = weekList[i];
+    if (wk.division !== division) continue;
+    if (!hasTeamsInWeek(wk, home, away)) continue;
+
+    var weekDate = new Date(wk.defaultDate);
+    var weekTime = weekDate.getTime();
+
+    // Calculate time difference (negative = past, positive = future)
+    var diff = weekTime - msgTime;
+
+    candidates.push({
+      week: wk,
+      diff: diff,
+      absDiff: Math.abs(diff)
+    });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Sort by:
+  // 1. Prefer upcoming weeks (diff >= -7 days) over far past weeks
+  // 2. Then by absolute difference (closest to message time)
+  candidates.sort(function(a, b) {
+    var sevenDays = 7 * 24 * 60 * 60 * 1000;
+    var aIsUpcoming = a.diff >= -sevenDays;
+    var bIsUpcoming = b.diff >= -sevenDays;
+
+    if (aIsUpcoming && !bIsUpcoming) return -1;
+    if (!aIsUpcoming && bIsUpcoming) return 1;
+
+    // Both upcoming or both past: pick closest
+    return a.absDiff - b.absDiff;
+  });
+
+  return candidates[0].week;
 }
 
 /**
@@ -566,7 +634,7 @@ function pollAndProcessFromId(channelId, startId, opt) {
     try {
       var msg0 = fetchSingleMessageInclusive(channelId, String(startId)); // best-effort
       if (msg0) {
-        var res0 = processOneDiscordMessage(msg0, startTime);
+        var res0 = processOneDiscordMessage(msg0, startTime, opt);
         processed++;
         if (res0 && res0.updated) updatedPairs += res0.updated;
         lastId = String(msg0.id || lastId);
@@ -635,7 +703,7 @@ function pollAndProcessFromId(channelId, startId, opt) {
 
       var msg = page[i];
       try {
-        var res = processOneDiscordMessage(msg, startTime);
+        var res = processOneDiscordMessage(msg, startTime, opt);
         processed++;
         if (res && res.updated) {
           updatedPairs += res.updated;
@@ -689,9 +757,11 @@ function pollAndProcessFromId(channelId, startId, opt) {
  * Process one Discord message through: content → parse → update.
  * @param {Object} msg - Discord message object {id, content, author, channel}
  * @param {number} startTime - Start time timestamp for timeout prevention
+ * @param {Object} options - Optional {skipScheduled: boolean}
  * @returns {Object} {updated: number, tentative?: boolean, parsed?: object, skipped?: boolean, reason?: string}
  */
-function processOneDiscordMessage(msg, startTime) {
+function processOneDiscordMessage(msg, startTime, options) {
+  options = options || {};
   if (!msg || !msg.content) return { updated: 0 };
 
   // Optional time check to prevent processing if we're running out of time
@@ -709,7 +779,21 @@ function processOneDiscordMessage(msg, startTime) {
     raw = msg.content;
     sendLog(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 100)}..."`);
 
-    parsed = parseScheduleMessage_v3(raw);
+    // Extract timestamp from Discord message (if available)
+    var messageDate = null;
+    if (msg.timestamp) {
+      // Discord provides ISO timestamp string
+      messageDate = new Date(msg.timestamp);
+    } else if (msg.id) {
+      // Extract timestamp from Discord snowflake ID
+      // Discord epoch is 2015-01-01T00:00:00.000Z (1420070400000 ms)
+      var snowflake = BigInt(msg.id);
+      var discordEpoch = 1420070400000;
+      var timestampMs = Number(snowflake >> 22n) + discordEpoch;
+      messageDate = new Date(timestampMs);
+    }
+
+    parsed = parseScheduleMessage_v3(raw, messageDate);
     sendLog(`🧪 Parsed: ${JSON.stringify(parsed)}`);
 
     if (!parsed || !parsed.ok || !parsed.team1 || !parsed.team2 || !parsed.division) {
@@ -728,10 +812,14 @@ function processOneDiscordMessage(msg, startTime) {
     let updateResult = null;
     try {
       if (typeof updateTablesMessageFromPairs === 'function' && parsed.pairs && parsed.weekKey) {
-        updateResult = updateTablesMessageFromPairs(parsed.weekKey, parsed.pairs);
+        updateResult = updateTablesMessageFromPairs(parsed.weekKey, parsed.pairs, options);
 
         if (updateResult.updated > 0) {
           sendLog(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>`);
+        }
+
+        if (updateResult.skipped && updateResult.skipped > 0) {
+          sendLog(`⏭️ Skipped ${updateResult.skipped} already-scheduled match(es)`);
         }
 
         if (updateResult.unmatched && updateResult.unmatched.length > 0) {
@@ -767,9 +855,10 @@ function processOneDiscordMessage(msg, startTime) {
  * Parse a Discord message (string) into schedule update pairs.
  * Returns { ok, pairs: [{division, home, away, epochSec?, whenText, weekKey}], trace }
  * @param {string} text - Raw Discord message text
+ * @param {Date} messageDate - Optional Discord message timestamp for historical week matching
  * @returns {Object} {ok: boolean, pairs?: array, division?: string, team1?: string, team2?: string, whenText?: string, weekKey?: string, trace: array, error?: string}
  */
-function parseScheduleMessage_v3(text) {
+function parseScheduleMessage_v3(text, messageDate) {
   var trace = [];
   TEAM_ALIAS_CACHE = null;
   TEAM_INDEX_CACHE = null; // Clear team index cache too
@@ -811,7 +900,7 @@ function parseScheduleMessage_v3(text) {
     var weekList = buildWeekListFromSheets();
 
     // which block/week?
-    var week = chooseWeekForPair(division, matchA.name, matchB.name, weekList, hintMap, raw, when);
+    var week = chooseWeekForPair(division, matchA.name, matchB.name, weekList, hintMap, raw, when, messageDate);
     if (!week || !week.date) {
       return { ok: false, error: 'week_not_found', trace: trace };
     }

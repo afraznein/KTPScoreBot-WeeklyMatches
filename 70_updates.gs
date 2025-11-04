@@ -132,9 +132,11 @@ function findMatchRowIndex(division, top, home, away) {
  * Update the weekly tables from parsed pairs and re-render Discord.
  * @param {string} weekKey  "YYYY-MM-DD|map_ref"
  * @param {Array<Object>} pairs  [{division, home, away, whenText, epochSec? , weekKey?}, ...]
- * @returns {{ok:boolean, weekKey:string, updated:number, unmatched:Array, store:any}}
+ * @param {Object} options  Optional {skipScheduled: boolean} - if true, skip matches already scheduled
+ * @returns {{ok:boolean, weekKey:string, updated:number, unmatched:Array, skipped:number, store:any}}
  */
-function updateTablesMessageFromPairs(weekKey, pairs) {
+function updateTablesMessageFromPairs(weekKey, pairs, options) {
+  options = options || {};
   // --- 0) Normalize inputs
   pairs = Array.isArray(pairs) ? pairs : [];
   if (!weekKey) {
@@ -160,6 +162,7 @@ function updateTablesMessageFromPairs(weekKey, pairs) {
   // --- 3) For each pair, locate row inside the division's block and persist schedule
   var updated = 0;
   var unmatched = [];
+  var skipped = 0;
 
   for (var i = 0; i < pairs.length; i++) {
     var p = pairs[i] || {};
@@ -182,6 +185,18 @@ function updateTablesMessageFromPairs(weekKey, pairs) {
       continue;
     }
 
+    // NEW: Skip if already scheduled (when skipScheduled option is enabled)
+    if (options.skipScheduled) {
+      var existingSchedule = store.sched && store.sched[div] && store.sched[div][rowIndex];
+      if (existingSchedule && existingSchedule.whenText) {
+        skipped++;
+        if (typeof sendLog === 'function') {
+          sendLog(`⏭️ Skipping already-scheduled: ${div} • ${home} vs ${away} • "${existingSchedule.whenText}"`);
+        }
+        continue;
+      }
+    }
+
     // Persist schedule in store: store.sched[division][rowIndex] = { epochSec?, whenText }
     if (!store.sched[div]) store.sched[div] = {};
     if (!store.sched[div][rowIndex]) store.sched[div][rowIndex] = {};
@@ -192,6 +207,22 @@ function updateTablesMessageFromPairs(weekKey, pairs) {
 
     // (Optional) keep names here to help renderers or debugging
     rec.home = home; rec.away = away;
+
+    // NEW: Write schedule to column E on the Google Sheet
+    try {
+      var sh = (typeof getSheetByName === 'function') ? getSheetByName(div) : null;
+      if (sh && top && typeof COL_SCHEDULED !== 'undefined') {
+        var gridStartRow = top + 1; // First data row after header
+        var targetRow = gridStartRow + rowIndex; // Actual sheet row for this match
+        var scheduleText = rec.whenText || '';
+        sh.getRange(targetRow, COL_SCHEDULED).setValue(scheduleText);
+      }
+    } catch (writeErr) {
+      // Log error but don't fail the entire operation
+      if (typeof sendLog === 'function') {
+        sendLog(`⚠️ Failed to write schedule to sheet column E: ${writeErr.message}`);
+      }
+    }
 
     updated++;
   }
@@ -207,5 +238,5 @@ function updateTablesMessageFromPairs(weekKey, pairs) {
     store._upsertError = String(e && e.message || e);
   }
 
-  return { ok: true, weekKey: weekKey, updated: updated, unmatched: unmatched, store: store };
+  return { ok: true, weekKey: weekKey, updated: updated, skipped: skipped, unmatched: unmatched, store: store };
 }
