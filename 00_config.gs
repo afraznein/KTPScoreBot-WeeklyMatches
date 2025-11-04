@@ -34,10 +34,10 @@
  *                     - Fixed "unmapped" matches - now properly locates match rows in sheets
  *                     - Added unmatched reason reporting (block_top_not_found, row_not_found)
  *                     - Store updates and Discord board refreshes now working
- * v3.0.1 (2025-11-02) - BUGFIX: Added missing getSheetByName_ function to 20_sheets.gs
- *                     - BUGFIX: Fixed relayPost_ call (replaced with postChannelMessage)
+ * v3.0.1 (2025-11-02) - BUGFIX: Added missing getSheetByName function to 20_sheets.gs
+ *                     - BUGFIX: Fixed relayPost call (replaced with postChannelMessage)
  *                     - Fixed "Cannot read properties of null" error on sheet access
- *                     - Fixed "relayPost_ is not defined" error in parser
+ *                     - Fixed "relayPost is not defined" error in parser
  * v3.0.0 (2025-11-02) - Major refactoring: Split 10main.gs into 8 focused modules
  *                     - Fixed 17 missing function definitions (underscore naming)
  *                     - Removed 7 dead code functions

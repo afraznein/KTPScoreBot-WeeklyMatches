@@ -12,18 +12,29 @@
 // Total: 2 functions
 // =======================
 
+/**
+ * Save a Twitch URL for a Discord user ID.
+ * @param {string} userId - Discord user ID (snowflake)
+ * @param {string} twitchUrl - Twitch channel URL or username
+ */
 function saveTwitchForUser(userId, twitchUrl) {
   const key = 'TWITCH_URL' + String(userId);
-  _props_().setProperty(key, String(twitchUrl));
+  props().setProperty(key, String(twitchUrl));
 }
 
+/**
+ * Retrieve a stored Twitch URL for a Discord user.
+ * @param {string} secret - Authentication secret
+ * @param {string} userId - Discord user ID (snowflake)
+ * @returns {Object} {ok: true, data: {userId, twitchUrl}} or {ok: false, error}
+ */
 function server_getTwitchUrl(secret, userId) {
   try {
-    _checkSecret_(secret);
+    checkSecret(secret);
     const key = 'TWITCH_URL' + String(userId);
-    const url = _props_().getProperty(key) || '';
-    return _ok_({ userId: String(userId), twitchUrl: url });
+    const url = props().getProperty(key) || '';
+    return ok({ userId: String(userId), twitchUrl: url });
   } catch (e) {
-    return _err_(e);
+    return error(e);
   }
 }

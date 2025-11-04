@@ -50,7 +50,7 @@ function ensureStoreShape(store) {
  * - compares names in C (home) and G (away)
  */
 function findMatchRowIndex(division, top, home, away) {
-  var sh = (typeof getSheetByName_ === 'function') ? getSheetByName_(division) : null;
+  var sh = (typeof getSheetByName === 'function') ? getSheetByName(division) : null;
   if (!sh) {
     if (typeof sendLog === 'function') sendLog(`🔍 findMatchRowIndex: sheet not found for ${division}`);
     return -1;
@@ -137,7 +137,7 @@ function updateTablesMessageFromPairs(weekKey, pairs) {
   }
 
   // --- 2) Load the store, ensure shape
-  var store = (typeof loadWeekStore_ === 'function') ? (loadWeekStore_(weekKey) || {}) : {};
+  var store = (typeof loadWeekStore === 'function') ? (loadWeekStore(weekKey) || {}) : {};
   ensureStoreShape(store);
 
   // --- 3) For each pair, locate row inside the division's block and persist schedule
@@ -151,8 +151,8 @@ function updateTablesMessageFromPairs(weekKey, pairs) {
     var away = String(p.away || '').trim();
     if (!div || !home || !away) { unmatched.push({ reason: 'bad_input', pair: p }); continue; }
 
-    var top = (typeof resolveDivisionBlockTop_ === 'function')
-      ? resolveDivisionBlockTop_(div, wkMeta)
+    var top = (typeof resolveDivisionBlockTop === 'function')
+      ? resolveDivisionBlockTop(div, wkMeta)
       : 0;
     if (!top) {
       unmatched.push({ reason: 'block_top_not_found', division: div, pair: p });
@@ -180,10 +180,10 @@ function updateTablesMessageFromPairs(weekKey, pairs) {
   }
 
   // --- 4) Save the store and re-render/update Discord (edit in place)
-  if (typeof saveWeekStore_ === 'function') saveWeekStore_(weekKey, store);
+  if (typeof saveWeekStore === 'function') saveWeekStore(weekKey, store);
   try {
-    if (typeof upsertWeeklyDiscordMessage_ === 'function') {
-      upsertWeeklyDiscordMessage_(wkMeta); // this will read the same store by weekKey
+    if (typeof upsertWeeklyDiscordMessage === 'function') {
+      upsertWeeklyDiscordMessage(wkMeta); // this will read the same store by weekKey
     }
   } catch (e) {
     // keep going but include error hint in payload

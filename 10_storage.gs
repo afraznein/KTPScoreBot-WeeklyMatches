@@ -43,9 +43,19 @@ function saveWeekStore(wk, obj) {
     .setProperty(weekStoreKey(wk), JSON.stringify(obj || { schedules: {}, shoutcasters: {} }));
 }
 
+/**
+ * Generate the script property key for Discord message IDs.
+ * @param {string} wk - Week key in format "YYYY-MM-DD|mapname"
+ * @returns {string} Script property key for message IDs
+ */
 function msgIdsKey(wk) { return 'WEEKLY_MSG_IDS::' + String(wk || ''); }
 
-/** Load IDs with full back-compat and normalize into a single shape. */
+/**
+ * Load Discord message IDs for a week (header, tables, rematches).
+ * Handles legacy formats and normalizes to consistent shape.
+ * @param {string} wk - Week key in format "YYYY-MM-DD|mapname"
+ * @returns {Object} {header, table, tables[], rematch, rematches[]}
+ */
 function loadMsgIds(wk) {
   var raw = PropertiesService.getScriptProperties().getProperty(msgIdsKey(wk));
   var obj = raw ? (function () { try { return JSON.parse(raw); } catch (_) { return null; } })() : null;
@@ -79,7 +89,12 @@ function loadMsgIds(wk) {
   };
 }
 
-/** Save IDs in both new and legacy-friendly shapes. */
+/**
+ * Save Discord message IDs for a week in both new and legacy-friendly formats.
+ * @param {string} wk - Week key in format "YYYY-MM-DD|mapname"
+ * @param {Object} ids - Message IDs object {header, table, rematch, tables[], rematches[]}
+ * @returns {Object} Normalized IDs object that was saved
+ */
 function saveMsgIds(wk, ids) {
   var out = {
     header: String(ids.header || ''),
@@ -94,6 +109,10 @@ function saveMsgIds(wk, ids) {
   return out;
 }
 
+/**
+ * Clear all stored Discord message IDs for a week.
+ * @param {string} wk - Week key in format "YYYY-MM-DD|mapname"
+ */
 function clearMsgIds(wk) {
   PropertiesService.getScriptProperties().deleteProperty(msgIdsKey(wk));
 }

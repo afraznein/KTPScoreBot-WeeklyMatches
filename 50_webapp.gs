@@ -5,7 +5,7 @@
 /** Small internal helpers for webapp. */
 function props() { return PropertiesService.getScriptProperties(); }
 
-function _getProp_(key, def) {
+function getProp(key, def) {
   const v = props().getProperty(key);
   return v != null ? v : (def || '');
 }
@@ -113,10 +113,10 @@ function secretFromRequest(e) {
 function server_getState() {
   try {
     const state = {
-      lastStartId: _getProp_('LAST_SCHED_MSG_ID', ''),
-      schedChannel: _getProp_('SCHED_INPUT_CHANNEL_ID', ''),
-      weeklyChannel: _getProp_('WEEKLY_POST_CHANNEL_ID', ''),
-      resultsChannel: _getProp_('RESULTS_LOG_CHANNEL_ID', '')
+      lastStartId: getProp('LAST_SCHED_MSG_ID', ''),
+      schedChannel: getProp('SCHED_INPUT_CHANNEL_ID', ''),
+      weeklyChannel: getProp('WEEKLY_POST_CHANNEL_ID', ''),
+      resultsChannel: getProp('RESULTS_LOG_CHANNEL_ID', '')
     };
     return ok(state);
   } catch (e) {
@@ -174,12 +174,12 @@ function server_resetWeeklyMsgIds(secret) {
     // Derive the same wkKey your upsert uses
     var w = (typeof getAlignedUpcomingWeekOrReport === 'function') ? getAlignedUpcomingWeekOrReport() : {};
     if (typeof syncHeaderMetaToTables === 'function') w = syncHeaderMetaToTables(w, 'Bronze');
-    var wkKey = (typeof weekKey_ === 'function') ? weekKey_(w)
+    var wkKey = (typeof weekKey === 'function') ? weekKey(w)
       : (w && w.date ? Utilities.formatDate(w.date, 'America/New_York', 'yyyy-MM-dd') : '') + '|' + (w.mapRef || '');
 
     // Load, then clear
-    var before = (typeof _loadMsgIds_ === 'function') ? _loadMsgIds_(wkKey) : {};
-    if (typeof _clearMsgIds_ === 'function') _clearMsgIds_(wkKey);
+    var before = (typeof loadMsgIds === 'function') ? loadMsgIds(wkKey) : {};
+    if (typeof clearMsgIds === 'function') clearMsgIds(wkKey);
 
     // Also clear the content hash so next post forces create/edit
     var hashKey = 'WEEKLY_MSG_HASHES::' + wkKey;
@@ -205,7 +205,7 @@ function server_deleteWeeklyCluster(secret) {
     var week = (typeof getAlignedUpcomingWeekOrReport === 'function') ? getAlignedUpcomingWeekOrReport() : null;
     if (!week || !week.date) throw new Error('No aligned week');
 
-    var wkKey = (typeof weekKey_ === 'function') ? weekKey_(week) : '';
+    var wkKey = (typeof weekKey === 'function') ? weekKey(week) : '';
     if (!wkKey) throw new Error('No weekKey');
 
     var channelId = PropertiesService.getScriptProperties().getProperty('WEEKLY_POST_CHANNEL_ID') ||
@@ -246,7 +246,7 @@ function server_deleteWeeklyCluster(secret) {
     }
 
     // Clear stored IDs and known hash keys for this week
-    PropertiesService.getScriptProperties().deleteProperty(_msgIdsKey_(wkKey));
+    PropertiesService.getScriptProperties().deleteProperty(msgIdsKey(wkKey));
     PropertiesService.getScriptProperties().deleteProperty('WEEKLY_MSG_HASHES::' + wkKey);
     PropertiesService.getScriptProperties().deleteProperty('WEEKLY_REMATCH_HASH::' + wkKey); // if you used a separate key earlier
 
@@ -324,7 +324,7 @@ function doGet(e) {
     }
     // Version info endpoint
     if (p.op === 'version' || p.op === 'v') {
-      const info = (typeof getVersionInfo_ === 'function') ? getVersionInfo_() : { version: '0.0.0', date: 'unknown', formatted: 'v0.0.0 (unknown)' };
+      const info = (typeof getVersionInfo === 'function') ? getVersionInfo() : { version: '0.0.0', date: 'unknown', formatted: 'v0.0.0 (unknown)' };
       return json(ok(info));
     }
     // Basic ping test
@@ -436,92 +436,6 @@ function server_probeRelayRoutes(secret) {
     return ok(results);
   } catch (e) {
     return error(e);
-  }
-}
-
-// ----- Back-processing endpoint for matches without map keys -----
-
-/**
- * Helper: Find a match across all week blocks in a division by team names only.
- * Returns { weekKey, blockTop, row, map } or null if not found.
- */
-function findMatchAcrossAllWeeks(division, homeTeam, awayTeam) {
-  try {
-    var sheet = (typeof getSheetByName === 'function') ? getSheetByName(division) : null;
-    if (!sheet) return null;
-
-    var G = (typeof _gridMeta_ === 'function') ? _gridMeta_() : {
-      firstMapRow: 28,
-      firstDateRow: 29,
-      stride: 11,
-      matchesPerBlock: 10
-    };
-
-    // Normalize team names for comparison
-    var homeNorm = (typeof normalizeTeamText === 'function')
-      ? normalizeTeamText(homeTeam)
-      : String(homeTeam || '').toLowerCase().trim();
-    var awayNorm = (typeof normalizeTeamText === 'function')
-      ? normalizeTeamText(awayTeam)
-      : String(awayTeam || '').toLowerCase().trim();
-
-    // Scan all week blocks (up to 20 weeks)
-    for (var blockIdx = 0; blockIdx < 20; blockIdx++) {
-      var mapRow = G.firstMapRow + blockIdx * G.stride;
-      var dateRow = G.firstDateRow + blockIdx * G.stride;
-      var blockTop = mapRow - 1;
-
-      if (mapRow > sheet.getLastRow()) break;
-
-      // Read map and date for this block
-      var mapRef = sheet.getRange(mapRow, 1).getDisplayValue().trim();
-      var dateTx = sheet.getRange(dateRow, 1).getDisplayValue().trim();
-
-      if (!mapRef || !dateTx) continue; // No more weeks
-
-      // Parse date to create weekKey
-      var date = (typeof _parseSheetDateET_ === 'function')
-        ? _parseSheetDateET_(dateTx)
-        : new Date(dateTx);
-      if (!date) continue;
-
-      var weekKey = Utilities.formatDate(date, 'America/New_York', 'yyyy-MM-dd') + '|' + mapRef.toLowerCase();
-
-      // Check each match row in this block
-      var matchStartRow = mapRow + 1; // First match row after map/date
-      for (var i = 0; i < G.matchesPerBlock; i++) {
-        var rowNum = matchStartRow + i;
-        if (rowNum > sheet.getLastRow()) break;
-
-        var cols = (typeof getGridCols_ === 'function') ? getGridCols_() : { T1: 3, T2: 7 };
-        var t1 = sheet.getRange(rowNum, cols.T1).getDisplayValue().trim();
-        var t2 = sheet.getRange(rowNum, cols.T2).getDisplayValue().trim();
-
-        if (!t1 || !t2) continue;
-
-        var t1Norm = (typeof normalizeTeamText === 'function')
-          ? normalizeTeamText(t1)
-          : t1.toLowerCase().trim();
-        var t2Norm = (typeof normalizeTeamText === 'function')
-          ? normalizeTeamText(t2)
-          : t2.toLowerCase().trim();
-
-        // Check if teams match
-        if (t1Norm === homeNorm && t2Norm === awayNorm) {
-          return {
-            weekKey: weekKey,
-            blockTop: blockTop,
-            row: i, // 0-based row index within block
-            map: mapRef,
-            date: date
-          };
-        }
-      }
-    }
-
-    return null; // Not found
-  } catch (e) {
-    throw new Error('Error searching for match: ' + (e.message || String(e)));
   }
 }
 

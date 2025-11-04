@@ -17,7 +17,6 @@
 // - cleanScheduleText(raw)
 // - resolveTeamAlias(rawInput)
 // - matchTeam(snippet, forcedDivision)
-// - normalizeTeamText(s)
 // - scoreTeamMatch(a, b)
 // - parseWhenFlexible(s, hintDiv, hintMap)
 // - buildWeekListFromSheets()
@@ -31,7 +30,7 @@
 // - processOneDiscordMessage(msg)
 // - parseScheduleMessage_v3(text)
 //
-// Total: 24 functions
+// Total: 23 functions
 // =======================
 // =======================
 // parser.gs – Discord message parsing logic
@@ -231,14 +230,6 @@ function matchTeam(snippet, forcedDivision) {
   }
   if (!best || bestScore < 2) return null;
   return { name: best.name, division: best.division };
-}
-
-function normalizeTeamText(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function scoreTeamMatch(a, b) {

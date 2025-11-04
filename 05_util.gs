@@ -126,6 +126,14 @@ function normalizeMap(s) {
   return String(s || '').trim().toLowerCase();
 }
 
+function normalizeTeamText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // ----- SNOWFLAKE (Discord ID) HELPERS -----
 
 /** Compare two Discord snowflake IDs (as strings). Returns -1, 0, or 1. */
@@ -467,3 +475,17 @@ function getRemainingTime(startTime, maxTime) {
     shouldStop: remaining < 30000 // Stop if less than 30 seconds left
   };
 }
+
+function isNumCell(s) { return /^\s*\d+\s*$/.test(String(s || '')); }
+
+function isWLT(s) {
+  var t = String(s || '').trim().toUpperCase();
+  return /^(W|L|T|FF|F|FORFEIT)$/.test(t);
+}
+
+function parseEtDate(s) {
+  if (typeof parseSheetDateET === 'function') return parseSheetDateET(s);
+  var d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+function blockHeaderTop(i) { return G.firstLabelRow + (i | 0) * G.stride; }

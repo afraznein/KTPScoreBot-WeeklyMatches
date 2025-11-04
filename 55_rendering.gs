@@ -266,12 +266,6 @@ function renderDivisionCurrentTable(division, week, store, mapName) {
   return [title, '```', header, sep].concat(outRows).concat(['```']).join('\n');
 }
 
-function renderDivisionTableSafely(division, week, store) {
-  if (typeof renderDivisionTableBody_ !== 'function') return '';
-  try { return renderDivisionTableBody_(division, week, store) || ''; }
-  catch (_) { try { return renderDivisionTableBody_(week, store, division) || ''; } catch (e) { return ''; } }
-}
-
 // Extract ONLY the data rows from a rendered division table's code fence
 // Keeps the inner padded lines (so alignment remains perfect).
 function extractTableRows(rendered) {
@@ -437,7 +431,6 @@ function renderDivisionWeekTable(division, week) {
 
 /**
  * Join Bronze, Silver, Gold pretty tables into ONE body (plain content).
- * Expects renderDivisionWeekTablePretty_(division, matches, label) to return a fenced block.
  */
 function renderWeeklyTablesBody(week) {
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
@@ -467,7 +460,6 @@ function renderRematchesTableBody() {
   makeups = Array.isArray(makeups) ? makeups.slice() : [];
   if (!makeups.length) return '';
 
-  function isBye(s) { return /^\s*BYE\s*$/i.test(String(s || '')); }
   makeups = makeups.filter(function (x) { return x && x.home && x.away && !isBye(x.home) && !isBye(x.away); });
   if (!makeups.length) return '';
 
