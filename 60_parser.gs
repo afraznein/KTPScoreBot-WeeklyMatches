@@ -21,8 +21,10 @@
 //
 // Total: 24 functions
 // =======================
-// parser.gs – Discord message parsing logic
-// =======================
+
+// Debug flag - set to true to enable verbose logging for troubleshooting
+var DEBUG_PARSER = false;
+
 /**
  * Build alias→canon map from the General sheet list. Cached per execution.
  * @returns {Object} Map of aliases to canonical map names
@@ -290,11 +292,13 @@ function scoreTeamMatch(a, b) {
  * @param {string} s - Date/time text to parse
  * @param {string} hintDiv - Optional division hint for context
  * @param {string} hintMap - Optional map hint for context
+ * @param {Date} referenceDate - Optional reference date for interpreting relative dates (defaults to now)
  * @returns {Object} {whenText: string, epochSec?: number} or {whenText: 'TBD'}
  */
-function parseWhenFlexible(s, hintDiv, hintMap) {
+function parseWhenFlexible(s, hintDiv, hintMap, referenceDate) {
   var tz = 'America/New_York';
   var lower = s.toLowerCase();
+  var refDate = referenceDate || new Date();
 
   // Known “TBD/postponed”
   if (/\b(tbd|to be determined|postponed|next week|time tbd)\b/.test(lower)) {
@@ -307,8 +311,8 @@ function parseWhenFlexible(s, hintDiv, hintMap) {
   if (mD) {
     var mm = +mD[1], dd = +mD[2], yy = mD[3] ? +mD[3] : null;
     if (yy && yy < 100) yy += 2000;
-    var baseYear = yy || new Date().getFullYear();
-    dateObj = new Date(Date.UTC(baseYear, mm - 1, dd));
+    var baseYear = yy || refDate.getFullYear();
+    dateObj = new Date(baseYear, mm - 1, dd);
   }
 
   // 4.2 textual month (october 5(th))
@@ -316,33 +320,34 @@ function parseWhenFlexible(s, hintDiv, hintMap) {
     var monMap = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
     var mM = lower.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(\d{4}))?\b/);
     if (mM) {
-      var mon = monMap[mM[1]]; var d = +mM[2]; var y = mM[3] ? +mM[3] : new Date().getFullYear();
-      dateObj = new Date(Date.UTC(y, mon, d));
+      var mon = monMap[mM[1]]; var d = +mM[2]; var y = mM[3] ? +mM[3] : refDate.getFullYear();
+      dateObj = new Date(y, mon, d);
     }
   }
 
-  // 4.3 “Sunday 1530 est” or “Monday 15th 10pm”
+  // 4.3 "Sunday 1530 est" or "Monday 15th 10pm"
   var dowIdx = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, thur: 4, fri: 5, sat: 6 };
   var mDow = lower.match(/\b(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat|saturday|sunday|monday|tuesday|wednesday|thursday|friday)\b/);
   if (!dateObj && mDow) {
-    var now = new Date();
     var targetDow = dowIdx[mDow[1].slice(0, 3)];
-    var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate());
     var delta = (targetDow - d.getDay() + 7) % 7;
-    if (delta === 0) delta = 7; // “this Sunday” usually means upcoming
+    if (delta === 0) delta = 7; // "this Sunday" usually means upcoming
     d.setDate(d.getDate() + delta);
 
-    // If we also have “15th|5th” day-of-month, align to that in current/next month
+    // If we also have "15th|5th" day-of-month, align to that in current/next month
     var mNth = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/);
     if (mNth) {
       var nth = +mNth[1];
       var try1 = new Date(d.getFullYear(), d.getMonth(), nth);
       var try2 = new Date(d.getFullYear(), d.getMonth() + 1, nth);
-      // choose the one that matches the desired dow and is not in the past
-      var cand = [try1, try2].filter(function (x) { return x.getDay() === targetDow; }).sort(function (a, b) { return a - b; })[0];
+      // choose the one that matches the desired dow and is not in the past (relative to refDate)
+      var refTime = refDate.getTime();
+      var cand = [try1, try2].filter(function (x) { return x.getDay() === targetDow && x.getTime() >= refTime; }).sort(function (a, b) { return a - b; })[0];
       if (cand) d = cand;
     }
-    dateObj = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    // Don't use Date.UTC - keep as local date, we'll handle timezone in the final formatting
+    dateObj = d;
   }
 
   // time: “9est”, “9:30 pm”, “1530 est”, “10east”
@@ -357,31 +362,37 @@ function parseWhenFlexible(s, hintDiv, hintMap) {
     if (ap === 'am' && hh === 12) hh = 0;
   }
 
-  // If still no date, but we have a division/map hint → use that week’s default Sunday
+  // If still no date, but we have a division/map hint → use that week's default Sunday
   if (!dateObj) {
     var wk = (typeof getAlignedUpcomingWeekOrReport === 'function') ? getAlignedUpcomingWeekOrReport() : {};
     if (typeof syncHeaderMetaToTables === 'function') wk = syncHeaderMetaToTables(wk, hintDiv || 'Bronze');
     if (wk && wk.date) {
-      var d = wk.date;
-      dateObj = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      dateObj = wk.date;
     }
   }
   if (!dateObj) return null;
 
   // Build ET datetime at hh:mm
-  var y = dateObj.getUTCFullYear(), m = dateObj.getUTCMonth(), d2 = dateObj.getUTCDate();
-  // Make a Date in ET by string (lets Google set offset DST-aware)
-  var local = Utilities.formatDate(new Date(Date.UTC(y, m, d2)), tz, 'yyyy-MM-dd');
-  var dt = new Date(local + 'T' + (('0' + (hh | 0)).slice(-2)) + ':' + (('0' + (mm | 0)).slice(-2)) + ':00');
+  // Create a date/time string in the format that Apps Script will parse correctly
+  var y = dateObj.getFullYear();
+  var m = dateObj.getMonth();
+  var d = dateObj.getDate();
+
+  // Create a new Date with the parsed date and time
+  // This creates a Date in the server's timezone, which we'll then interpret as ET
+  var dt = new Date(y, m, d, hh, mm, 0);
+
   var epoch = Math.floor(dt.getTime() / 1000);
 
-  var whenText = Utilities.formatDate(dt, tz, 'h:mm a') + ' ET';
+  // Include date in format: "3:00 PM ET 9/15"
+  var whenText = Utilities.formatDate(dt, tz, 'h:mm a') + ' ET ' + Utilities.formatDate(dt, tz, 'M/d');
   return { epochSec: epoch, whenText: whenText };
 }
 
 /**
  * Build a list of all weeks from all division sheets.
- * @returns {Array} Array of week objects {division, map, date, top}
+ * Includes matches array for each week to enable matchup searching.
+ * @returns {Array} Array of week objects {division, map, date, defaultDate, top, matches: [{home, away}]}
  */
 function buildWeekListFromSheets() {
   var weeks = [];
@@ -408,11 +419,41 @@ function buildWeekListFromSheets() {
       var date = (typeof parseSheetDateET === 'function') ? parseSheetDateET(dateTx) : new Date(dateTx);
       if (!date) continue;
 
+      var top = G.firstMapRow + idx * G.stride - 1; // Header row is one above map row
+
+      // Read match grid (10 rows starting from mapRow - map/date rows also contain matches)
+      var gridStartRow = mapRow;
+      var matches = [];
+      try {
+        var matchData = sheet.getRange(gridStartRow, COL_T1_NAME, 10, 5).getDisplayValues(); // C..G (home, sched, away columns)
+        for (var r = 0; r < matchData.length; r++) {
+          var homeTeam = matchData[r][0].trim(); // Column C
+          var awayTeam = matchData[r][4].trim(); // Column G
+          if (homeTeam && awayTeam) {
+            matches.push({ home: homeTeam, away: awayTeam });
+          }
+        }
+        // Debug: Log first week's matches for each division
+        if (DEBUG_PARSER && typeof sendLog === 'function' && idx === 0) {
+          sendLog(`📋 ${divName} Week 1 (${mapRef}, ${dateTx}): ${matches.length} matches`);
+          if (matches.length > 0) {
+            sendLog(`   First match: ${matches[0].home} vs ${matches[0].away}`);
+          }
+        }
+      } catch (e) {
+        // If reading fails, just create an empty matches array
+        if (typeof sendLog === 'function') {
+          sendLog(`⚠️ Failed to read matches for ${divName} week ${idx}: ${e.message}`);
+        }
+      }
+
       weeks.push({
         division: divName,
         map: mapRef.toLowerCase(),
         date: date,
-        top: G.firstMapRow + idx * G.stride - 1 // Header row is one above map row
+        defaultDate: date, // Add this for compatibility
+        top: top,
+        matches: matches
       });
     }
   }
@@ -446,8 +487,16 @@ function chooseWeekForPair(division, home, away, weekList, hintMap, rawText, whe
   // 2. Try date hint from parsed time
   if (when && typeof when.epochSec === 'number') {
     var d = new Date(when.epochSec * 1000);
+    if (DEBUG_PARSER && typeof sendLog === 'function') {
+      sendLog(`🔎 Step 2: Trying date matching for ${home} vs ${away} on ${d.toISOString()}`);
+    }
     var wByDate = findWeekByDateAndPair(division, d, home, away, weekList);
-    if (wByDate) return wByDate;
+    if (wByDate) {
+      if (DEBUG_PARSER && typeof sendLog === 'function') sendLog(`✅ Step 2: Found week by date`);
+      return wByDate;
+    } else {
+      if (DEBUG_PARSER && typeof sendLog === 'function') sendLog(`❌ Step 2: No week found by date (matchup may not exist in that week)`);
+    }
   }
 
   // 3. Check for make-up keywords
@@ -459,11 +508,22 @@ function chooseWeekForPair(division, home, away, weekList, hintMap, rawText, whe
 
   // 4. NEW: Use message timestamp as fallback for historical parsing
   if (messageDate && typeof findWeekByMessageTime === 'function') {
+    if (DEBUG_PARSER && typeof sendLog === 'function') {
+      sendLog(`🔎 Step 4: Trying message timestamp matching for ${home} vs ${away} (msg posted ${messageDate.toISOString()})`);
+    }
     var wByMsgTime = findWeekByMessageTime(division, messageDate, home, away, weekList);
-    if (wByMsgTime) return wByMsgTime;
+    if (wByMsgTime) {
+      if (DEBUG_PARSER && typeof sendLog === 'function') sendLog(`✅ Step 4: Found week by message timestamp`);
+      return wByMsgTime;
+    } else {
+      if (DEBUG_PARSER && typeof sendLog === 'function') sendLog(`❌ Step 4: No week found by message timestamp (matchup may not exist in any week)`);
+    }
   }
 
   // 5. Final fallback: current week
+  if (DEBUG_PARSER && typeof sendLog === 'function') {
+    sendLog(`⚠️ Step 5: Falling back to current week (no historical match found)`);
+  }
   return wk;
 }
 
@@ -484,6 +544,7 @@ function findWeekByMapAndPair(division, map, home, away, weekList) {
 
 /**
  * Helper function to find week by date and team pair.
+ * Finds the FIRST week (chronologically) that has this matchup and is on/after the target date.
  * @param {string} division - Division name
  * @param {Date} dateObj - Date object to match against
  * @param {string} home - Home team name
@@ -492,12 +553,38 @@ function findWeekByMapAndPair(division, map, home, away, weekList) {
  * @returns {Object|null} Week object or null if not found
  */
 function findWeekByDateAndPair(division, dateObj, home, away, weekList) {
-  if (!Array.isArray(weekList)) return null;
-  return weekList.find(w => {
-    if (w.division !== division) return false;
-    var weekDate = new Date(w.defaultDate);
-    return isSameWeek(dateObj, weekDate) && hasTeamsInWeek(w, home, away);
+  if (!Array.isArray(weekList) || !dateObj) return null;
+
+  var targetTime = dateObj.getTime();
+  var candidates = [];
+
+  // Find all weeks with this matchup that are on/after the target date
+  for (var i = 0; i < weekList.length; i++) {
+    var w = weekList[i];
+    if (w.division !== division) continue;
+    if (!hasTeamsInWeek(w, home, away)) continue;
+
+    var weekDate = new Date(w.defaultDate || w.date);
+    var weekTime = weekDate.getTime();
+
+    // Allow up to 7 days before for flexibility (message posted same week as match)
+    var sevenDaysBefore = targetTime - (7 * 24 * 60 * 60 * 1000);
+    if (weekTime >= sevenDaysBefore) {
+      candidates.push({
+        week: w,
+        weekTime: weekTime
+      });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Sort chronologically and return the FIRST upcoming week
+  candidates.sort(function(a, b) {
+    return a.weekTime - b.weekTime;
   });
+
+  return candidates[0].week;
 }
 
 /**
@@ -520,7 +607,8 @@ function findPastUnplayedWeekForPair(division, home, away, weekList) {
 
 /**
  * Find week for a team pair based on Discord message timestamp.
- * Looks for the closest upcoming week (or current week if message is same week as match).
+ * Finds the FIRST upcoming week (>= message date) that has this matchup.
+ * This handles the common case where captains post schedules before the match week.
  * Used as fallback when message has no map/date hints.
  * @param {string} division - Division name
  * @param {Date} messageDate - Date when the Discord message was posted
@@ -535,40 +623,43 @@ function findWeekByMessageTime(division, messageDate, home, away, weekList) {
   var msgTime = messageDate.getTime();
   var candidates = [];
 
-  // Find all weeks with this matchup in the division
+  if (DEBUG_PARSER && typeof sendLog === 'function') {
+    sendLog(`🔍 findWeekByMessageTime: Looking for ${home} vs ${away} in ${division}, total weeks: ${weekList.length}`);
+  }
+
+  // Find all weeks with this matchup in the division that are >= message date
   for (var i = 0; i < weekList.length; i++) {
     var wk = weekList[i];
     if (wk.division !== division) continue;
+
+    // Debug: Show what matches this week has
+    if (DEBUG_PARSER && typeof sendLog === 'function' && i < 3) {
+      var matchCount = wk.matches ? wk.matches.length : 0;
+      var sample = wk.matches && wk.matches[0] ? (wk.matches[0].home + ' vs ' + wk.matches[0].away) : 'none';
+      sendLog(`  Week ${i} (${wk.division}, ${wk.map}): ${matchCount} matches, sample: ${sample}`);
+    }
+
     if (!hasTeamsInWeek(wk, home, away)) continue;
 
-    var weekDate = new Date(wk.defaultDate);
+    var weekDate = new Date(wk.defaultDate || wk.date);
     var weekTime = weekDate.getTime();
 
-    // Calculate time difference (negative = past, positive = future)
-    var diff = weekTime - msgTime;
-
-    candidates.push({
-      week: wk,
-      diff: diff,
-      absDiff: Math.abs(diff)
-    });
+    // Only consider weeks that are on/after the message date (captains schedule ahead)
+    // Allow up to 7 days in the past for messages posted during the week
+    var sevenDaysAgo = msgTime - (7 * 24 * 60 * 60 * 1000);
+    if (weekTime >= sevenDaysAgo) {
+      candidates.push({
+        week: wk,
+        weekTime: weekTime
+      });
+    }
   }
 
   if (candidates.length === 0) return null;
 
-  // Sort by:
-  // 1. Prefer upcoming weeks (diff >= -7 days) over far past weeks
-  // 2. Then by absolute difference (closest to message time)
+  // Sort chronologically and return the FIRST upcoming week with this matchup
   candidates.sort(function(a, b) {
-    var sevenDays = 7 * 24 * 60 * 60 * 1000;
-    var aIsUpcoming = a.diff >= -sevenDays;
-    var bIsUpcoming = b.diff >= -sevenDays;
-
-    if (aIsUpcoming && !bIsUpcoming) return -1;
-    if (!aIsUpcoming && bIsUpcoming) return 1;
-
-    // Both upcoming or both past: pick closest
-    return a.absDiff - b.absDiff;
+    return a.weekTime - b.weekTime;
   });
 
   return candidates[0].week;
@@ -775,6 +866,8 @@ function processOneDiscordMessage(msg, startTime, options) {
 
   let parsed = null;
   let raw = null;
+  let isTentative = false;
+  let isRematch = false;
   try {
     raw = msg.content;
     sendLog(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 100)}..."`);
@@ -784,13 +877,17 @@ function processOneDiscordMessage(msg, startTime, options) {
     if (msg.timestamp) {
       // Discord provides ISO timestamp string
       messageDate = new Date(msg.timestamp);
+      if (DEBUG_PARSER) sendLog(`📅 Message timestamp from msg.timestamp: ${messageDate.toISOString()}`);
     } else if (msg.id) {
       // Extract timestamp from Discord snowflake ID
       // Discord epoch is 2015-01-01T00:00:00.000Z (1420070400000 ms)
       var snowflake = BigInt(msg.id);
       var discordEpoch = 1420070400000;
-      var timestampMs = Number(snowflake >> 22n) + discordEpoch;
+      var timestampMs = Number(snowflake >> BigInt(22)) + discordEpoch;
       messageDate = new Date(timestampMs);
+      if (DEBUG_PARSER) sendLog(`📅 Message timestamp from snowflake ${msg.id}: ${messageDate.toISOString()}`);
+    } else {
+      if (DEBUG_PARSER) sendLog(`📅 No message timestamp available`);
     }
 
     parsed = parseScheduleMessage_v3(raw, messageDate);
@@ -801,9 +898,8 @@ function processOneDiscordMessage(msg, startTime, options) {
       return { updated: 0 };
     }
 
-
-    const isTentative = parsed.status === 'Confirming' || parsed.tentative;
-    const isRematch = parsed.isRematch || false;
+    isTentative = parsed.status === 'Confirming' || parsed.tentative;
+    isRematch = parsed.isRematch || false;
 
     // Log this parsed result
     logMatchToWMLog(parsed, msg.author?.id || msg.authorId, msg.channel?.name || msg.channelName || msg.channel, isTentative, isRematch);
@@ -829,13 +925,6 @@ function processOneDiscordMessage(msg, startTime, options) {
       }
     } catch (e) {
       sendLog(`⚠️ Error updating tables: ${e.message}`);
-    }
-
-    // Send confirmation to log channel
-    const rowInfo = (updateResult && updateResult.updated > 0) ? 'Mapped' : 'Unmapped';
-    const line = formatScheduleConfirmationLine(parsed, null, msg.author?.id, msg.id);
-    if (typeof postChannelMessage === 'function') {
-      postChannelMessage(RESULTS_LOG_CHANNEL_ID, line);
     }
 
   }
@@ -892,8 +981,8 @@ function parseScheduleMessage_v3(text, messageDate) {
     var division = hintDiv || matchA.division || matchB.division;
     trace.push('division=' + division);
 
-    // when
-    var when = parseWhenFlexible(cleaned, hintDiv, hintMap);
+    // when (use messageDate as reference for historical parsing)
+    var when = parseWhenFlexible(cleaned, hintDiv, hintMap, messageDate);
     if (when && when.whenText) trace.push('when=' + JSON.stringify(when));
 
     // Build week list from spreadsheet (all weeks across all divisions)

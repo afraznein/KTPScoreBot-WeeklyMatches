@@ -24,7 +24,20 @@
  * Last Updated: 2025-11-04
  *
  * CHANGELOG:
- * v3.4.0 (2025-11-04) - FEATURE: Fixed back process / historical parsing match feature implementation for current use case 
+ * v3.4.0 (2025-11-04) - FEATURE: Historical message parsing with intelligent week matching
+ *                     - Fixed buildWeekListFromSheets() to include matches array for matchup searching
+ *                     - Enhanced date parsing to use Discord message timestamp as reference context
+ *                     - Updated findWeekByDateAndPair() to find first upcoming week with matchup
+ *                     - Updated findWeekByMessageTime() to find first upcoming week (captains schedule ahead)
+ *                     - Added schedule date to format: "3:00 PM ET 9/15" (was just "3:00 PM ET")
+ *                     - Fixed timezone handling in parseWhenFlexible() (removed UTC conversions)
+ *                     - Fixed double Discord reporting (removed duplicate postChannelMessage call)
+ *                     - Added DEBUG_PARSER flag to toggle verbose logging (default: false)
+ *                     - Fixed isTentative scope error in processOneDiscordMessage()
+ *                     - Fixed BigInt syntax for Google Apps Script (22n → BigInt(22))
+ *                     - Added skipScheduled option to prevent re-processing scheduled matches
+ *                     - Column E (COL_SCHEDULED) now written with full date/time schedule
+ *                     - Historical parsing UI added to control panel (ktp_control_panel.html)
  * v3.3.0 (2025-11-04) - FEATURE: Full function refactor, JSDoc and summary headers across project file 
  * v3.2.0 (2025-11-04) - FEATURE: Added back-processing capability for matches without map keys
  *                     - Added server_backprocessMatch() endpoint in 50_webapp.gs
