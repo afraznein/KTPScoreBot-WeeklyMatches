@@ -20,10 +20,37 @@
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.5.0
- * Last Updated: 2025-11-05
+ * Version: 3.6.0
+ * Last Updated: 2025-11-06
  *
  * CHANGELOG:
+ * v3.6.0 (2025-11-06) - FEATURE: Scheduled times now display in Discord tables (replaces TBD)
+ *                     - Discord tables read from column E and store.sched to show actual match times
+ *                     - Added scheduled field and rowIndex to getMatchesForDivisionWeek()
+ *                     - Updated renderDivisionWeekTable() to accept store and display schedules
+ *                     - FEATURE: DEBUG_PARSER centralized with UI toggle in control panel
+ *                     - Moved DEBUG_PARSER to 00_config.gs (global var for runtime modification)
+ *                     - Added server_getDebugStatus() and server_setDebugParser() endpoints
+ *                     - Added debug parser toggle checkbox in ktp_control_panel.html
+ *                     - FEATURE: Division hint validation - trusts team roster over captain hints
+ *                     - Parser now tries without hint if teams not found in hinted division
+ *                     - Warns captains when division hint doesn't match actual team division
+ *                     - Prevents "row_not_found" errors from wrong division hints (e.g., "Silver:" for Bronze teams)
+ *                     - FEATURE: Historical parsing continue functionality
+ *                     - Added "Continue from Last" button for resuming historical parsing
+ *                     - Added last message ID display with copy-to-clipboard button
+ *                     - Control panel shows last processed message ID on page load
+ *                     - BUGFIX: Fixed message counting - inclusive message now uses finally block
+ *                     - Ensures all processed messages are counted, even on errors
+ *                     - BUGFIX: Fixed field name mismatches causing "undefined" errors
+ *                     - Normalized updatedPairs → updated, skippedPairs → skipped for UI compatibility
+ *                     - Added skipped count tracking throughout parser pipeline
+ *                     - Enhanced error handling in server_startPollingFrom with detailed messages
+ *                     - ENHANCEMENT: Control panel UI improvements
+ *                     - Added version badge display (loads from server_getVersion)
+ *                     - Added confirmation dialogs for destructive operations (delete, reset)
+ *                     - Improved button hierarchy and visual feedback
+ *                     - Stretched debug dock to viewport bottom for better visibility
  * v3.5.0 (2025-11-05) - FEATURE: Discord message links in schedule confirmations
  *                     - Added DISCORD_GUILD_ID configuration constant
  *                     - Added buildDiscordMessageLink() helper function in 05_util.gs
@@ -91,8 +118,11 @@
  *                     - Automatic weekly board posting
  */
 
-const VERSION = '3.5.0';
-const VERSION_DATE = '2025-11-05';
+const VERSION = '3.6.0';
+const VERSION_DATE = '2025-11-06';
+
+// ---- DEBUG SETTINGS ----
+var DEBUG_PARSER = false;  // Toggle verbose parser logging (🔍, 🗺️, 📈 messages)
 
 // ---- DISCORD RELAY ----
 const RELAY_BASE = 'RELAY_BASE';

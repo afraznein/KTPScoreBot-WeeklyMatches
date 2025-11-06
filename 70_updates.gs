@@ -14,6 +14,7 @@
 //
 // Total: 5 functions
 // =======================
+// Note: DEBUG_PARSER flag is now in 00_config.gs
 
 /**
  * Parse "YYYY-MM-DD|map" into a week object with a real Date in local ET.
@@ -82,8 +83,8 @@ function findMatchRowIndex(division, top, home, away) {
   };
   var nh = norm(home), na = norm(away);
 
-  // Diagnostic logging (sheet only - verbose)
-  if (typeof logToSheet === 'function') {
+  // Diagnostic logging (sheet only - verbose, debug mode only)
+  if (DEBUG_PARSER && typeof logToSheet === 'function') {
     logToSheet(`🔍 Finding match: "${home}" vs "${away}" → normalized: "${nh}" vs "${na}"`);
     logToSheet(`🔍 Searching ${division} rows ${gridStartRow}-${gridStartRow + rows - 1} (block top: ${top})`);
   }
@@ -94,14 +95,14 @@ function findMatchRowIndex(division, top, home, away) {
     var ch = norm(r[1]); // C (home)
     var ca = norm(r[5]); // G (away)
 
-    if (i < 3 && typeof logToSheet === 'function') {
-      // Log first 3 rows for debugging (sheet only)
+    if (DEBUG_PARSER && i < 3 && typeof logToSheet === 'function') {
+      // Log first 3 rows for debugging (sheet only, debug mode only)
       logToSheet(`🔍 Row ${i}: sheet="${r[1]}" vs "${r[5]}" → normalized: "${ch}" vs "${ca}"`);
     }
 
     // Check both orders: (home vs away) OR (away vs home)
     if (ch && ca && ((ch === nh && ca === na) || (ch === na && ca === nh))) {
-      if (typeof logToSheet === 'function') logToSheet(`✅ Exact match found at row ${i}`);
+      if (DEBUG_PARSER && typeof logToSheet === 'function') logToSheet(`✅ Exact match found at row ${i}`);
       return i;
     }
   }
@@ -118,7 +119,7 @@ function findMatchRowIndex(division, top, home, away) {
   }
 
   if (candidates.length === 1) {
-    if (typeof logToSheet === 'function') logToSheet(`✅ Fuzzy match found at row ${candidates[0]}`);
+    if (DEBUG_PARSER && typeof logToSheet === 'function') logToSheet(`✅ Fuzzy match found at row ${candidates[0]}`);
     return candidates[0];
   }
 

@@ -21,9 +21,7 @@
 //
 // Total: 24 functions
 // =======================
-
-// Debug flag - set to true to enable verbose logging for troubleshooting
-var DEBUG_PARSER = false;
+// Note: DEBUG_PARSER flag is now in 00_config.gs
 
 /**
  * Build alias→canon map from the General sheet list. Cached per execution.
@@ -118,12 +116,14 @@ function extractMapHint(text) {
 
 /**
  * Strip map hint from text (e.g., remove "dod_railyard_b6" from message).
+ * Uses both the alias catalog AND a fallback pattern for dod_* maps.
  * @param {string} text - Text to clean
  * @returns {string} Text with map hint removed
  */
 function stripMapHint(text) {
   var t = String(text || '');
 
+  // First, try catalog-based removal (accurate)
   var aliasToCanon = getMapAliasCatalog();
   var aliases = Object.keys(aliasToCanon);
 
@@ -142,6 +142,11 @@ function stripMapHint(text) {
     // Remove the map name and clean up extra whitespace
     t = t.replace(re, ' ').replace(/\s+/g, ' ').trim();
   }
+
+  // Fallback: Remove any dod_* pattern (map names not yet in catalog)
+  // Matches: dod_mapname, dod_mapname_b6, dod_map_name_b12, etc.
+  var dodPattern = /\bdod_[a-z0-9_]+\b/gi;
+  t = t.replace(dodPattern, ' ').replace(/\s+/g, ' ').trim();
 
   return t;
 }
@@ -748,8 +753,8 @@ function hasTeamsInWeek(week, home, away) {
  * Performance-optimized with batch limits and time monitoring.
  * @param {string} channelId - Discord channel ID to poll
  * @param {string} startId - Starting message ID
- * @param {Object} opt - Options {inclusive: boolean, maxProcess: number, maxTime: number}
- * @returns {Object} {ok: boolean, processed: number, updatedPairs: number, errors: array, lastPointer: string, stats: object}
+ * @param {Object} opt - Options {inclusive: boolean, maxProcess: number, maxTime: number, skipScheduled: boolean}
+ * @returns {Object} {processed: number, updatedPairs: number, skippedPairs: number, errors: array, lastPointer: string, stoppedEarly: boolean, stopReason: string, elapsedMs: number}
  */
 function pollAndProcessFromId(channelId, startId, opt) {
   var successCount = 0;
@@ -764,6 +769,7 @@ function pollAndProcessFromId(channelId, startId, opt) {
 
   var processed = 0;
   var updatedPairs = 0;
+  var skippedPairs = 0;
   var errors = [];
   var lastId = startId ? String(startId) : '';
   var stoppedEarly = false;
@@ -777,10 +783,20 @@ function pollAndProcessFromId(channelId, startId, opt) {
     try {
       var msg0 = fetchSingleMessageInclusive(channelId, String(startId)); // best-effort
       if (msg0) {
-        var res0 = processOneDiscordMessage(msg0, startTime, opt);
-        processed++;
-        if (res0 && res0.updated) updatedPairs += res0.updated;
-        lastId = String(msg0.id || lastId);
+        try {
+          var res0 = processOneDiscordMessage(msg0, startTime, opt);
+          if (res0 && res0.updated) updatedPairs += res0.updated;
+          if (res0 && res0.skipped) skippedPairs += res0.skipped;
+          lastId = String(msg0.id || lastId);
+        } catch (e) {
+          errors.push('process ' + String(msg0.id) + ': ' + String(e && e.message || e));
+        } finally {
+          // Always increment processed count for the inclusive message
+          processed++;
+          if (DEBUG_PARSER && typeof logToSheet === 'function') {
+            logToSheet(`📈 Processed inclusive message, count: ${processed}`);
+          }
+        }
       }
     } catch (e) {
       errors.push('inclusive fetch failed: ' + String(e && e.message || e));
@@ -852,6 +868,9 @@ function pollAndProcessFromId(channelId, startId, opt) {
           if (res.tentative) tentativeCount++;
           else successCount++;
         }
+        if (res && res.skipped) {
+          skippedPairs += res.skipped;
+        }
         lastId = String(msg.id || lastId);
       } catch (e) {
         errors.push('process ' + String(msg && msg.id) + ': ' + String(e && e.message || e));
@@ -893,12 +912,13 @@ function pollAndProcessFromId(channelId, startId, opt) {
   return {
     processed: processed,
     updatedPairs: updatedPairs,
+    skippedPairs: skippedPairs,
     errors: errors,
     lastPointer: lastId,
     stoppedEarly: stoppedEarly,
     stopReason: stopReason,
     elapsedMs: elapsed
-  }
+  };
 }
 
 /**
@@ -981,16 +1001,16 @@ function processOneDiscordMessage(msg, startTime, options) {
           // Try multiple ways to get channel ID: direct property, nested object, or from options
           var channelId = msg.channel_id || (msg.channel && msg.channel.id) || options.channelId || (typeof SCHED_INPUT_CHANNEL_ID !== 'undefined' ? SCHED_INPUT_CHANNEL_ID : '');
 
-          // Debug logging to troubleshoot link building
-          if (typeof logToSheet === 'function') {
-            logToSheet(`🔗 Link debug: channelId="${channelId}", msg.id="${msg.id}", msg.channel_id="${msg.channel_id}", options.channelId="${options.channelId}"`);
-          }
+          // Debug logging to troubleshoot link building (disabled)
+          // if (typeof logToSheet === 'function') {
+          //   logToSheet(`🔗 Link debug: channelId="${channelId}", msg.id="${msg.id}", msg.channel_id="${msg.channel_id}", options.channelId="${options.channelId}"`);
+          // }
 
           if (channelId && msg.id && typeof buildDiscordMessageLink === 'function') {
             var link = buildDiscordMessageLink(channelId, msg.id);
-            if (typeof logToSheet === 'function') {
-              logToSheet(`🔗 Built link: "${link}"`);
-            }
+            // if (typeof logToSheet === 'function') {
+            //   logToSheet(`🔗 Built link: "${link}"`);
+            // }
             if (link) messageLink = ` • [Jump to message](${link})`;
           }
           sendLog(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`);
@@ -1015,9 +1035,11 @@ function processOneDiscordMessage(msg, startTime, options) {
 
   // Only count as updated if we actually scheduled something (not skipped/unmatched)
   var actuallyUpdated = (updateResult && updateResult.updated > 0) ? 1 : 0;
+  var actuallySkipped = (updateResult && updateResult.skipped > 0) ? updateResult.skipped : 0;
 
   return {
     updated: actuallyUpdated,
+    skipped: actuallySkipped,
     tentative: isTentative,
     parsed: parsed
   };
@@ -1048,7 +1070,7 @@ function parseScheduleMessage_v3(text, messageDate) {
 
     // Strip map hint from text before splitting teams (prevents "dod_railyard_b6 NoGo" being treated as team name)
     var cleanedForTeams = stripMapHint(cleaned);
-    if (cleanedForTeams !== cleaned && typeof logToSheet === 'function') {
+    if (DEBUG_PARSER && cleanedForTeams !== cleaned && typeof logToSheet === 'function') {
       logToSheet(`🗺️ Stripped map from text: "${cleaned}" → "${cleanedForTeams}"`);
     }
 
@@ -1059,15 +1081,45 @@ function parseScheduleMessage_v3(text, messageDate) {
     }
     trace.push('sides=' + JSON.stringify(sides));
 
+    // Try to match teams with hint first
     var matchA = matchTeam(sides.a, hintDiv);
     var matchB = matchTeam(sides.b, hintDiv);
+
+    // If not found with hint, try without hint (hint might be wrong)
+    if ((!matchA || !matchB) && hintDiv) {
+      var matchA2 = matchTeam(sides.a, null);
+      var matchB2 = matchTeam(sides.b, null);
+      if (matchA2 && matchB2) {
+        // Found teams without hint - hint was probably wrong
+        matchA = matchA2;
+        matchB = matchB2;
+        if (typeof sendLog === 'function') {
+          sendLog(`⚠️ Teams not found in "${hintDiv}" division, but found in "${matchA.division}" - captain may have wrong division hint`);
+        }
+      }
+    }
+
     if (!matchA || !matchB) {
       return { ok: false, error: 'team_not_found', detail: { a: !!matchA, b: !!matchB }, trace: trace };
     }
-    if (!hintDiv && matchA.division && matchB.division && matchA.division !== matchB.division) {
+
+    // Check if teams are in different divisions (cross-division match - not allowed)
+    if (matchA.division && matchB.division && matchA.division !== matchB.division) {
       return { ok: false, error: 'cross_division', trace: trace, detail: { a: matchA, b: matchB } };
     }
-    var division = hintDiv || matchA.division || matchB.division;
+
+    // Determine final division: trust team lookups over hint
+    var actualDivision = matchA.division || matchB.division;
+    var division = actualDivision || hintDiv;
+
+    // Warn if hint doesn't match actual division
+    if (hintDiv && actualDivision && hintDiv !== actualDivision) {
+      if (typeof sendLog === 'function') {
+        sendLog(`⚠️ Division hint mismatch: captain said "${hintDiv}" but "${matchA.name}" vs "${matchB.name}" are in "${actualDivision}" - using actual division`);
+      }
+      trace.push('hint_mismatch=' + hintDiv + ' actual=' + actualDivision);
+    }
+
     trace.push('division=' + division);
 
     // when (use messageDate as reference for historical parsing)

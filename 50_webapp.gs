@@ -183,6 +183,57 @@ function secretFromRequest(e) {
  * Get current bot configuration state.
  * @returns {Object} {ok: true, data: {lastStartId, schedChannel, weeklyChannel, resultsChannel}}
  */
+/**
+ * Get version information.
+ * @returns {Object} {ok: true, data: {version, date}}
+ */
+function server_getVersion() {
+  try {
+    return ok({
+      version: typeof VERSION !== 'undefined' ? VERSION : 'unknown',
+      date: typeof VERSION_DATE !== 'undefined' ? VERSION_DATE : 'unknown'
+    });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Get debug parser status.
+ * @returns {Object} {ok: true, data: {debugParser: boolean}}
+ */
+function server_getDebugStatus() {
+  try {
+    return ok({
+      debugParser: typeof DEBUG_PARSER !== 'undefined' ? DEBUG_PARSER : false
+    });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Set debug parser status.
+ * @param {string} secret - Authentication secret
+ * @param {boolean} enabled - Enable or disable debug parser
+ * @returns {Object} {ok: true, data: {debugParser: boolean}}
+ */
+function server_setDebugParser(secret, enabled) {
+  try {
+    checkSecret(secret);
+    DEBUG_PARSER = !!enabled;
+    return ok({
+      debugParser: DEBUG_PARSER
+    });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Get current state of polling pointers and channel IDs.
+ * @returns {Object} {ok: true, data: {lastStartId, schedChannel, weeklyChannel, resultsChannel}}
+ */
 function server_getState() {
   try {
     const state = {
@@ -390,22 +441,38 @@ function server_postOrUpdate(secret) {
  * @param {string} secret - Authentication secret
  * @param {string} startId - Discord message ID to start from (inclusive)
  * @param {boolean} [skipScheduled=false] - Skip matches that already have schedules
- * @returns {Object} {ok: true, data: {processed, updatedPairs, errors, lastPointer, tookMs}}
+ * @returns {Object} {ok: true, data: {processed, updated, skipped, errors, lastPointer, tookMs}}
  */
 function server_startPollingFrom(secret, startId, skipScheduled) {
   try {
     checkSecret(secret);
-    var channelId = PropertiesService.getScriptProperties().getProperty('SCHED_INPUT_CHANNEL_ID')
+    var channelId = PropertiesService.getScriptProperties().getProperty('SCHED_INPUT_CHANNEL_ID');
     if (!channelId) throw new Error('SCHED_INPUT_CHANNEL_ID is missing');
+    if (!startId) throw new Error('startId parameter is required');
 
     var t0 = Date.now();
     var opts = { inclusive: true };
     if (skipScheduled) opts.skipScheduled = true;
     var summary = pollAndProcessFromId(channelId, String(startId), opts);
+
+    // Normalize field names for UI compatibility
     summary.tookMs = Date.now() - t0;
+    summary.updated = summary.updatedPairs || 0;
+    summary.skipped = summary.skippedPairs || 0;
+    summary.errors = Array.isArray(summary.errors) ? summary.errors.length : 0;
+
     return ok(summary);
   } catch (e) {
-    return error(e);
+    // Enhanced error handling for debugging
+    var errMsg = 'Unknown error';
+    if (e && e.message) {
+      errMsg = String(e.message);
+    } else if (e && e.toString) {
+      errMsg = e.toString();
+    } else if (e) {
+      errMsg = JSON.stringify(e);
+    }
+    return error(new Error('server_startPollingFrom: ' + errMsg));
   }
 }
 

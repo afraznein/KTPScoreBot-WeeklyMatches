@@ -329,6 +329,8 @@ function getMatchesForDivisionWeek(division, top) {
     out.push({
       home: home,
       away: away,
+      scheduled: String(r[3] || '').trim(), // E (scheduled time)
+      rowIndex: i, // Keep track of row index for store lookups
       // handy to keep around (not shown in table yet)
       homeScore: (r[2] === '' || r[2] == null) ? null : r[2], // D
       awayScore: (r[6] === '' || r[6] == null) ? null : r[6]  // H

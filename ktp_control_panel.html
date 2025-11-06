@@ -164,8 +164,8 @@
       position: fixed;
       right: 16px;
       top: 16px;
+      bottom: 16px;
       width: 420px;
-      height: 52vh;
       background: var(--panel);
       border: 1px solid #374151;
       border-radius: 10px;
@@ -226,7 +226,10 @@
 
 <body>
   <div class="wrap">
-    <h1>KTP Weekly Matches Panel</h1>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+      <h1 style="margin: 16px 0 0;">KTP Weekly Matches Panel</h1>
+      <span id="versionBadge" style="font-size: 11px; color: var(--muted); font-family: monospace;">Loading...</span>
+    </div>
 
     <div class="grid">
       <!-- Connection / Secrets -->
@@ -242,6 +245,11 @@
           <button id="btnVerifySecrets" class="btn">Verify Secrets</button>
           <button id="btnState" class="btn">Get State</button>
           <button id="btnProbe" class="btn">Probe Relay</button>
+        </div>
+        <div class="row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #374151;">
+          <label>Debug Parser</label>
+          <label><input id="debugParserToggle" type="checkbox" /> Enable verbose parser logs (🔍, 🗺️, 📈)</label>
+          <span id="debugStatus" style="font-size: 11px; color: var(--muted); margin-left: 8px;">Loading...</span>
         </div>
         <div class="footer-note">
           Tip: Script properties supported: <code>WEBAPP_SECRET</code>, <code>WEBAPP_SECRET_V2</code>,
@@ -265,19 +273,25 @@
         </div>
       </div>
 
-      <!-- Historical Parsing -->
-      <div class="card" style="grid-column: span 12;">
-        <h2>Historical Parsing</h2>
+      <!-- Historical Parsing (Primary Parser) -->
+      <div class="card" style="grid-column: span 12; border: 2px solid var(--ok);">
+        <h2>🔄 Historical Parsing (Primary Parser)</h2>
         <div class="footer-note" style="margin-top: 0; margin-bottom: 10px;">
-          Bulk re-parse old Discord messages from captains. Uses message timestamps to match schedules to historical weeks. Useful for back-filling schedules from earlier in the season.
+          <strong>Recommended for catching up:</strong> Bulk re-parse old Discord messages from captains. Uses message timestamps to match schedules to historical weeks. Useful for back-filling schedules from earlier in the season.
         </div>
         <div class="row">
-          <label for="histStartId">Start Message ID</label>
-          <input id="histStartId" type="text" placeholder="e.g. 1423841447026622534" />
+          <label>Last Processed ID</label>
+          <span id="lastHistMsgId" style="font-family: monospace; color: #666;">Loading...</span>
+          <button id="btnCopyLastId" class="btn" style="margin-left: 8px; font-size: 11px; padding: 4px 8px;">Copy ID</button>
+        </div>
+        <div class="row">
+          <label for="histStartId">Start Message ID (optional)</label>
+          <input id="histStartId" type="text" placeholder="Leave empty to continue from last" />
           <label><input id="skipScheduled" type="checkbox" checked /> Skip already-scheduled matches</label>
         </div>
         <div class="row">
-          <button id="btnHistParse" class="btn ok">Parse Historical Messages</button>
+          <button id="btnHistContinue" class="btn ok" style="font-weight: 600;">▶ Continue from Last</button>
+          <button id="btnHistParse" class="btn">Parse from Specific ID</button>
         </div>
       </div>
 
@@ -457,15 +471,109 @@
       .server_startPolling(secret);
     };
 
-    // Parse Historical Messages
+    // Load version badge
+    function loadVersionBadge() {
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok && res.data && res.data.version) {
+          $('versionBadge').textContent = `v${res.data.version} (${res.data.date})`;
+        } else {
+          $('versionBadge').textContent = 'Version unknown';
+        }
+      }).withFailureHandler(e => {
+        $('versionBadge').textContent = 'Version error';
+      }).server_getVersion();
+    }
+
+    // Load last processed message ID on page load
+    function loadLastMessageId() {
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok && res.data) {
+          const lastId = res.data.lastStartId || 'None';
+          $('lastHistMsgId').textContent = lastId;
+          $('lastHistMsgId').style.color = lastId === 'None' ? '#999' : '#2ecc71';
+        }
+      }).withFailureHandler(e => {
+        $('lastHistMsgId').textContent = 'Error loading';
+        $('lastHistMsgId').style.color = '#e74c3c';
+      }).server_getState();
+    }
+
+    // Load debug parser status on page load
+    function loadDebugStatus() {
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok && res.data) {
+          const isEnabled = res.data.debugParser || false;
+          $('debugParserToggle').checked = isEnabled;
+          $('debugStatus').textContent = isEnabled ? '🟢 Enabled' : '⚪ Disabled';
+          $('debugStatus').style.color = isEnabled ? 'var(--ok)' : 'var(--muted)';
+        }
+      }).withFailureHandler(e => {
+        $('debugStatus').textContent = '❌ Error';
+        $('debugStatus').style.color = 'var(--err)';
+      }).server_getDebugStatus();
+    }
+
+    // Toggle debug status when checkbox changes
+    $('debugParserToggle').onchange = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) {
+        out('❌ Missing secret', 'err');
+        loadDebugStatus(); // Revert checkbox
+        return;
+      }
+
+      const enabled = $('debugParserToggle').checked;
+      $('debugStatus').textContent = '⏳ Updating...';
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok) {
+          const isEnabled = res.data.debugParser;
+          $('debugStatus').textContent = isEnabled ? '🟢 Enabled' : '⚪ Disabled';
+          $('debugStatus').style.color = isEnabled ? 'var(--ok)' : 'var(--muted)';
+          out(`✅ Debug parser ${isEnabled ? 'enabled' : 'disabled'}`, 'ok');
+        } else {
+          out('❌ Failed to update: ' + res.error, 'err');
+          loadDebugStatus(); // Revert checkbox
+        }
+      }).withFailureHandler(e => {
+        out('❌ Script error: ' + e.message, 'err');
+        loadDebugStatus(); // Revert checkbox
+      }).server_setDebugParser(secret, enabled);
+    };
+
+    // Load on page load
+    loadVersionBadge();
+    loadLastMessageId();
+    loadDebugStatus();
+
+    // Copy Last ID button
+    $('btnCopyLastId').onclick = async () => {
+      const lastId = $('lastHistMsgId').textContent;
+      if (lastId === 'None' || lastId === 'Loading...' || lastId === 'Error loading') {
+        out('⚠️ No valid ID to copy', 'err');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(lastId);
+        out('✅ Copied ID: ' + lastId, 'ok');
+      } catch (e) {
+        out('❌ Failed to copy to clipboard', 'err');
+      }
+    };
+
+    // Parse Historical Messages (from specific ID)
     $('btnHistParse').onclick = () => {
       const secret = sanitizeSecretFieldValue($('secret').value);
       const id = $('histStartId').value.trim();
       const skip = $('skipScheduled').checked;
-      if (!secret) { out('missing secret','err'); return; }
-      if (!/^\d{5,30}$/.test(id)) { out('invalid message id','err'); return; }
+      if (!secret) { out('❌ Missing secret','err'); return; }
+      if (!id) {
+        out('❌ Please enter a message ID or use "Continue from Last" button','err');
+        return;
+      }
+      if (!/^\d{5,30}$/.test(id)) { out('❌ Invalid message ID format','err'); return; }
       setBusy(true, 'Parsing historical messages…');
-      out('▶ Parse Historical Messages (skipScheduled=' + skip + ')…');
+      out('▶ Parse Historical Messages from ' + id + ' (skipScheduled=' + skip + ')…');
       google.script.run.withSuccessHandler(res => {
         if (res.ok) {
           const d = res.data;
@@ -474,13 +582,55 @@
             '  Updated: ' + (d.updated || 0) + ' schedules\n' +
             '  Skipped: ' + (d.skipped || 0) + ' (already scheduled)\n' +
             '  Errors: ' + (d.errors || 0) + '\n' +
+            '  Last ID: ' + (d.lastPointer || 'unknown') + '\n' +
             '  Time: ' + (d.tookMs || 0) + 'ms', 'ok');
+          loadLastMessageId(); // Refresh the displayed ID
+          $('histStartId').value = ''; // Clear input after success
         } else {
           out('❌ ' + res.error, 'err');
         }
         setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
       .server_startPollingFrom(secret, id, skip);
+    };
+
+    // Continue Historical Parsing from last pointer
+    $('btnHistContinue').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      const skip = $('skipScheduled').checked;
+      if (!secret) { out('missing secret','err'); return; }
+
+      setBusy(true, 'Loading last pointer…');
+      google.script.run.withSuccessHandler(stateRes => {
+        if (!stateRes || !stateRes.ok || !stateRes.data || !stateRes.data.lastStartId) {
+          out('❌ No last pointer found. Use "Parse Historical Messages" first.', 'err');
+          setBusy(false);
+          return;
+        }
+
+        const lastId = stateRes.data.lastStartId;
+        out('▶ Continue Historical Parsing from ' + lastId + ' (skipScheduled=' + skip + ')…');
+
+        google.script.run.withSuccessHandler(res => {
+          if (res.ok) {
+            const d = res.data;
+            out('✅ Historical Parse Complete:\n' +
+              '  Processed: ' + (d.processed || 0) + ' messages\n' +
+              '  Updated: ' + (d.updated || 0) + ' schedules\n' +
+              '  Skipped: ' + (d.skipped || 0) + ' (already scheduled)\n' +
+              '  Errors: ' + (d.errors || 0) + '\n' +
+              '  Last ID: ' + (d.lastPointer || 'unknown') + '\n' +
+              '  Time: ' + (d.tookMs || 0) + 'ms', 'ok');
+            loadLastMessageId(); // Refresh the displayed ID
+          } else {
+            out('❌ ' + res.error, 'err');
+          }
+          setBusy(false);
+        }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+        .server_startPollingFrom(secret, lastId, skip);
+
+      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      .server_getState();
     };
 
     // Post / Update Weekly Board
@@ -495,29 +645,38 @@
       .server_postOrUpdate(secret);
     };
 
-    // Delete Weekly Cluster
+    // Delete Weekly Cluster (with confirmation)
     $('btnDelete').onclick = () => {
+      if (!confirm('⚠️ Are you sure you want to DELETE the entire weekly cluster from Discord?\n\nThis will remove all weekly board messages and cannot be undone.')) {
+        out('❌ Delete cancelled', 'err');
+        return;
+      }
       const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('missing secret','err'); return; }
-      setBusy(true, 'Deleting weekly cluster…'); out('▶ Delete Weekly Cluster…');
+      if (!secret) { out('❌ Missing secret','err'); return; }
+      setBusy(true, 'Deleting weekly cluster…');
+      out('▶ Delete Weekly Cluster…');
       google.script.run.withSuccessHandler(res => {
-        out(res.ok ? '✅ deleted' : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+        out(res.ok ? '✅ Deleted' : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
         setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
       .server_deleteWeeklyCluster(secret);
     };
 
-    // Reset saved message IDs (header/weekly/rematches)
+    // Reset saved message IDs (with confirmation)
     $('btnResetIds').onclick = () => {
+      if (!confirm('⚠️ Reset saved Discord message IDs?\n\nThis will clear stored header/table message IDs. The next post will create new messages instead of editing existing ones.')) {
+        out('❌ Reset cancelled', 'err');
+        return;
+      }
       const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('missing secret','err'); return; }
-      setBusy(true, 'Resetting saved IDs…'); out('▶ Reset Saved IDs…');
-      // Try preferred name; fall back if you named it differently server-side
+      if (!secret) { out('❌ Missing secret','err'); return; }
+      setBusy(true, 'Resetting saved IDs…');
+      out('▶ Reset Saved IDs…');
       google.script.run.withSuccessHandler(res => {
         if (res && res.ok) out('✅ IDs reset', 'ok');
         else out('❌ ' + (res && res.error), 'err');
         setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
       .server_resetMsgIdsForCurrent(secret);
     };
 

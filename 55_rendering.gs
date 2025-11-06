@@ -412,21 +412,9 @@ function renderTablesPages(week, store) {
  * @param {Object} week - Week object
  * @returns {string} Rendered table with code fence or empty string
  */
-function renderDivisionWeekTable(division, week) {
-  var sh = getSheetByName(division);
-  if (!sh) return '';
-
-  var G = gridMeta();
-  var top = resolveDivisionBlockTop(division, week);
-  if (!top) return '';
-
-  // Grid band for this block
-  var firstMatchRow = top + 1;           // header at top, data starts at next row
-  var numRows = G.matchesPerBlock; // 10
-  var numCols = 8;                 // A..H
-
-  // Pull rows A..H but we'll only use C and G for team names
-  var band = sh.getRange(firstMatchRow, 1, numRows, numCols).getDisplayValues();
+function renderDivisionWeekTable(division, matches, store) {
+  // matches is an array from getMatchesForDivisionWeek
+  if (!matches || !matches.length) return '';
 
   // Required helpers for your formatting
   if (typeof getTableWidths !== 'function' ||
@@ -442,10 +430,10 @@ function renderDivisionWeekTable(division, week) {
   var sep = repeat('-', header.length);
 
   var rows = [];
-  for (var i = 0; i < band.length; i++) {
-    var r = band[i];
-    var home = String(r[2] || '').trim(); // C
-    var away = String(r[6] || '').trim(); // G
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i];
+    var home = m.home || '';
+    var away = m.away || '';
     if (!home && !away) continue;
     if (/^\s*BYE\s*$/i.test(home) || /^\s*BYE\s*$/i.test(away)) continue;
 
@@ -453,7 +441,15 @@ function renderDivisionWeekTable(division, week) {
       ? formatVsRow(home, away, W.COL1)
       : padRight(home, Math.floor((W.COL1 - 3) / 2)) + ' vs ' + padLeft(away, Math.ceil((W.COL1 - 3) / 2));
 
-    rows.push(vs + ' | ' + padCenter('TBD', W.COL2) + ' | ' + padCenter('-', W.COL3));
+    // Get scheduled time: prefer store data, fallback to sheet column E
+    var scheduledText = 'TBD';
+    if (store && store.sched && store.sched[division] && store.sched[division][m.rowIndex]) {
+      scheduledText = store.sched[division][m.rowIndex].whenText || m.scheduled || 'TBD';
+    } else if (m.scheduled) {
+      scheduledText = m.scheduled;
+    }
+
+    rows.push(vs + ' | ' + padCenter(scheduledText, W.COL2) + ' | ' + padCenter('-', W.COL3));
   }
   if (!rows.length) return '';
 
@@ -465,9 +461,10 @@ function renderDivisionWeekTable(division, week) {
 /**
  * Join Bronze, Silver, Gold pretty tables into ONE body (plain content).
  * @param {Object} week - Week object
+ * @param {Object} store - Week store with schedule data (optional)
  * @returns {string} Combined table body for all divisions
  */
-function renderWeeklyTablesBody(week) {
+function renderWeeklyTablesBody(week, store) {
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var chunks = [];
 
@@ -479,7 +476,7 @@ function renderWeeklyTablesBody(week) {
     var matches = (typeof getMatchesForDivisionWeek === 'function') ? getMatchesForDivisionWeek(div, top) : [];
     if (!matches || !matches.length) continue;
 
-    var block = (typeof renderDivisionWeekTable === 'function') ? renderDivisionWeekTable(div, matches, div) : '';
+    var block = (typeof renderDivisionWeekTable === 'function') ? renderDivisionWeekTable(div, matches, store) : '';
     if (block && /\S/.test(block)) chunks.push(block);
   }
 
