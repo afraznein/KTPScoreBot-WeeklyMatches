@@ -20,10 +20,21 @@
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.4.0
- * Last Updated: 2025-11-04
+ * Version: 3.5.0
+ * Last Updated: 2025-11-05
  *
  * CHANGELOG:
+ * v3.5.0 (2025-11-05) - FEATURE: Discord message links in schedule confirmations
+ *                     - Added DISCORD_GUILD_ID configuration constant
+ *                     - Added buildDiscordMessageLink() helper function in 05_util.gs
+ *                     - Schedule confirmations now include clickable "Jump to message" links
+ *                     - BUGFIX: Fixed message counting (finally block ensures all messages counted)
+ *                     - BUGFIX: Fixed updateResult scope issue causing "not defined" errors
+ *                     - BUGFIX: Added stripMapHint() to prevent map names in team names (e.g., "dod_railyard_b6 NoGo")
+ *                     - Added logToSheet() function for verbose logging without Discord spam
+ *                     - Moved verbose debug logs to WM_Log sheet only (🔍, 👀, 🧪 messages)
+ *                     - Removed duplicate skip logging (generic count message)
+ *                     - Updated successCount/tentativeCount logic to reflect actual scheduled matches
  * v3.4.0 (2025-11-04) - FEATURE: Historical message parsing with intelligent week matching
  *                     - Fixed buildWeekListFromSheets() to include matches array for matchup searching
  *                     - Enhanced date parsing to use Discord message timestamp as reference context
@@ -80,12 +91,15 @@
  *                     - Automatic weekly board posting
  */
 
-const VERSION = '3.4.0';
-const VERSION_DATE = '2025-11-04';
+const VERSION = '3.5.0';
+const VERSION_DATE = '2025-11-05';
 
 // ---- DISCORD RELAY ----
 const RELAY_BASE = 'RELAY_BASE';
 const RELAY_AUTH = 'RELAY_AUTH';
+
+// Server
+const DISCORD_GUILD_ID = '996884268804493363';  // KTP Discord server ID
 
 // Channels
 const SCHED_INPUT_CHANNEL_ID = '1063529682919755927';  // captains post schedules

@@ -8,6 +8,7 @@
 // Functions in this module:
 // Version: getVersionInfo, logVersionToDiscord
 // Strings: ktpEmoji, normalizeWhitespace, isJustPings, decStringMinusOne, normalizeMap, normalizeTeamText
+// Discord: buildDiscordMessageLink
 // Dates: parseDateFromText, getTimezone, discordEpochAt9pmFromISO
 // Formatting: formatWeeklyNotice
 // Snowflakes: compareSnowflakes, maxSnowflake
@@ -20,7 +21,7 @@
 // Sheets: getDivisionSheets, getSheetByName, getSeasonInfo, colIdx, getGridCols
 // Cells: getRemainingTime, isNumCell, isWLT, parseEtDate, blockHeaderTop
 //
-// Total: 47 functions
+// Total: 48 functions
 // =======================
 
 /**
@@ -130,6 +131,20 @@ function normalizeTeamText(s) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Build a Discord message link (clickable URL to jump to a message).
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID
+ * @param {string} guildId - Discord guild/server ID (optional, defaults to DISCORD_GUILD_ID)
+ * @returns {string} Discord message URL or empty string if missing required IDs
+ */
+function buildDiscordMessageLink(channelId, messageId, guildId) {
+  if (!channelId || !messageId) return '';
+  var guild = guildId || (typeof DISCORD_GUILD_ID !== 'undefined' ? DISCORD_GUILD_ID : '');
+  if (!guild) return '';
+  return `https://discord.com/channels/${guild}/${channelId}/${messageId}`;
 }
 
 // ----- DATE & TIME HELPERS -----

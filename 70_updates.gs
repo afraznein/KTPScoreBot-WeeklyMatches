@@ -82,25 +82,26 @@ function findMatchRowIndex(division, top, home, away) {
   };
   var nh = norm(home), na = norm(away);
 
-  // Diagnostic logging
-  if (typeof sendLog === 'function') {
-    sendLog(`🔍 Finding match: "${home}" vs "${away}" → normalized: "${nh}" vs "${na}"`);
-    sendLog(`🔍 Searching ${division} rows ${gridStartRow}-${gridStartRow + rows - 1} (block top: ${top})`);
+  // Diagnostic logging (sheet only - verbose)
+  if (typeof logToSheet === 'function') {
+    logToSheet(`🔍 Finding match: "${home}" vs "${away}" → normalized: "${nh}" vs "${na}"`);
+    logToSheet(`🔍 Searching ${division} rows ${gridStartRow}-${gridStartRow + rows - 1} (block top: ${top})`);
   }
 
-  // Exact match first
+  // Exact match first (check both team orders)
   for (var i = 0; i < band.length; i++) {
     var r = band[i]; // [B,C,D,E,F,G,H]
     var ch = norm(r[1]); // C (home)
     var ca = norm(r[5]); // G (away)
 
-    if (i < 3 && typeof sendLog === 'function') {
-      // Log first 3 rows for debugging
-      sendLog(`🔍 Row ${i}: sheet="${r[1]}" vs "${r[5]}" → normalized: "${ch}" vs "${ca}"`);
+    if (i < 3 && typeof logToSheet === 'function') {
+      // Log first 3 rows for debugging (sheet only)
+      logToSheet(`🔍 Row ${i}: sheet="${r[1]}" vs "${r[5]}" → normalized: "${ch}" vs "${ca}"`);
     }
 
-    if (ch && ca && ch === nh && ca === na) {
-      if (typeof sendLog === 'function') sendLog(`✅ Exact match found at row ${i}`);
+    // Check both orders: (home vs away) OR (away vs home)
+    if (ch && ca && ((ch === nh && ca === na) || (ch === na && ca === nh))) {
+      if (typeof logToSheet === 'function') logToSheet(`✅ Exact match found at row ${i}`);
       return i;
     }
   }
@@ -117,7 +118,7 @@ function findMatchRowIndex(division, top, home, away) {
   }
 
   if (candidates.length === 1) {
-    if (typeof sendLog === 'function') sendLog(`✅ Fuzzy match found at row ${candidates[0]}`);
+    if (typeof logToSheet === 'function') logToSheet(`✅ Fuzzy match found at row ${candidates[0]}`);
     return candidates[0];
   }
 

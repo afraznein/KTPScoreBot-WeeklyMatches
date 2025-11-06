@@ -7,13 +7,14 @@
 //
 // Functions in this module:
 // - logLocal(level, event, data)
+// - logToSheet(msg)
 // - sendLog(msg)
 // - formatScheduleConfirmationLine(parsed, row, authorId, msgId)
 // - logParsingSummary(successCount, tentativeCount, sourceChannel)
 // - logMatchToWMLog(entry, authorId, sourceChannel, isTentative, isRematch)
 // - logToWmSheet(level, event, message, detailsObj)
 //
-// Total: 6 functions
+// Total: 7 functions
 // =======================
 
 // ----- LOGGING -----
@@ -35,24 +36,13 @@ function logLocal(level, event, data) {
 }
 
 /**
- * Send a brief log message to the results log channel (if configured) and write to sheet.
- * Posts to Discord RESULTS_LOG_CHANNEL_ID and appends to WM_Log sheet.
+ * Write a log message only to WM_Log sheet (no Discord posting).
  * @param {string} msg - Message to log
  */
-function sendLog(msg) {
-  // Send to Discord log channel
-  try {
-    if (typeof postChannelMessage === 'function' && RESULTS_LOG_CHANNEL_ID) {
-      postChannelMessage(RESULTS_LOG_CHANNEL_ID, msg);
-    }
-  } catch (e) {
-    console.error('sendLog Discord post failed:', e);
-  }
-
-  // Write to WM_Log sheet
+function logToSheet(msg) {
   try {
     if (!SPREADSHEET_ID) {
-      console.error('sendLog: SPREADSHEET_ID not configured');
+      console.error('logToSheet: SPREADSHEET_ID not configured');
       return;
     }
 
@@ -68,8 +58,27 @@ function sendLog(msg) {
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
     sh.appendRow([timestamp, 'INFO', String(msg)]);
   } catch (e) {
-    console.error('sendLog sheet write failed:', e);
+    console.error('logToSheet failed:', e);
   }
+}
+
+/**
+ * Send a brief log message to the results log channel (if configured) and write to sheet.
+ * Posts to Discord RESULTS_LOG_CHANNEL_ID and appends to WM_Log sheet.
+ * @param {string} msg - Message to log
+ */
+function sendLog(msg) {
+  // Send to Discord log channel
+  try {
+    if (typeof postChannelMessage === 'function' && RESULTS_LOG_CHANNEL_ID) {
+      postChannelMessage(RESULTS_LOG_CHANNEL_ID, msg);
+    }
+  } catch (e) {
+    console.error('sendLog Discord post failed:', e);
+  }
+
+  // Write to WM_Log sheet
+  logToSheet(msg);
 }
 
 /**

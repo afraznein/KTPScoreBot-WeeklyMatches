@@ -117,6 +117,36 @@ function extractMapHint(text) {
 }
 
 /**
+ * Strip map hint from text (e.g., remove "dod_railyard_b6" from message).
+ * @param {string} text - Text to clean
+ * @returns {string} Text with map hint removed
+ */
+function stripMapHint(text) {
+  var t = String(text || '');
+
+  var aliasToCanon = getMapAliasCatalog();
+  var aliases = Object.keys(aliasToCanon);
+
+  // Sort longest first to avoid partial overshadowing
+  aliases.sort(function (a, b) { return b.length - a.length; });
+
+  function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  for (var i = 0; i < aliases.length; i++) {
+    var alias = aliases[i];
+
+    // Build a regex that matches the alias as words, allowing underscores or spaces
+    var pattern = '\\b' + esc(alias).replace(/_/g, '[ _]*') + '\\b';
+    var re = new RegExp(pattern, 'gi');
+
+    // Remove the map name and clean up extra whitespace
+    t = t.replace(re, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  return t;
+}
+
+/**
  * Optional team synonym map from Script Properties (JSON).
  * @returns {Object} Map of team synonyms or empty object if not configured
  */
@@ -350,14 +380,20 @@ function parseWhenFlexible(s, hintDiv, hintMap, referenceDate) {
     dateObj = d;
   }
 
-  // time: “9est”, “9:30 pm”, “1530 est”, “10east”
-  var mT = lower.match(/\b(\d{1,2})(?::?(\d{2}))?\s*(am|pm)?\s*(e[ds]?t|east)?\b/);
+  // time: "9est", "9:30 pm", "1530 est", "10east"
+  // Require am/pm/est to be present to avoid matching day numbers like "15th"
+  var mT = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|est|et|edt|east)\b/);
   var hh = 21, mm = 0; // default 9:00 PM if unspecified (your rule)
   if (mT) {
     hh = +mT[1];
-    mm = mT[2] ? +mT[2] : (mT[1].length === 3 ? +mT[1].slice(1) : 0); // handle 930
-    var ap = mT[3] ? mT[3].toLowerCase() : '';
-    if (!ap && hh <= 12) ap = 'pm'; // default PM when ambiguous
+    mm = mT[2] ? +mT[2] : 0;
+    var tz = mT[3] ? mT[3].toLowerCase() : '';
+    var ap = '';
+    if (tz === 'am' || tz === 'pm') {
+      ap = tz;
+    } else if (!ap && hh <= 12) {
+      ap = 'pm'; // default PM when ambiguous
+    }
     if (ap === 'pm' && hh < 12) hh += 12;
     if (ap === 'am' && hh === 12) hh = 0;
   }
@@ -373,15 +409,24 @@ function parseWhenFlexible(s, hintDiv, hintMap, referenceDate) {
   if (!dateObj) return null;
 
   // Build ET datetime at hh:mm
-  // Create a date/time string in the format that Apps Script will parse correctly
   var y = dateObj.getFullYear();
   var m = dateObj.getMonth();
   var d = dateObj.getDate();
 
-  // Create a new Date with the parsed date and time
-  // This creates a Date in the server's timezone, which we'll then interpret as ET
-  var dt = new Date(y, m, d, hh, mm, 0);
+  // Build ISO string with explicit ET timezone offset
+  // Determine if this date is in EDT (UTC-4) or EST (UTC-5)
+  var testDate = new Date(Date.UTC(y, m, d, 12, 0, 0));
+  var offset = Utilities.formatDate(testDate, tz, 'Z'); // Returns "-0400" or "-0500"
 
+  // Build ISO 8601 string: "2025-09-15T22:00:00-04:00"
+  var isoStr = y + '-' +
+    ('0' + (m + 1)).slice(-2) + '-' +
+    ('0' + d).slice(-2) + 'T' +
+    ('0' + hh).slice(-2) + ':' +
+    ('0' + mm).slice(-2) + ':00' +
+    offset.slice(0, 3) + ':' + offset.slice(3); // Convert "-0400" to "-04:00"
+
+  var dt = new Date(isoStr);
   var epoch = Math.floor(dt.getTime() / 1000);
 
   // Include date in format: "3:00 PM ET 9/15"
@@ -684,14 +729,18 @@ function isSameWeek(d1, d2) {
 
 /**
  * Check if a week contains a specific match (by team names).
+ * Checks both team orders since captains may schedule in either direction.
  * @param {Object} week - Week object with matches array
  * @param {string} home - Home team name
  * @param {string} away - Away team name
- * @returns {boolean} True if week contains this matchup
+ * @returns {boolean} True if week contains this matchup (in either order)
  */
 function hasTeamsInWeek(week, home, away) {
   if (!week || !Array.isArray(week.matches)) return false;
-  return week.matches.some(m => m.home === home && m.away === away);
+  return week.matches.some(m =>
+    (m.home === home && m.away === away) ||
+    (m.home === away && m.away === home)
+  );
 }
 
 /**
@@ -719,6 +768,9 @@ function pollAndProcessFromId(channelId, startId, opt) {
   var lastId = startId ? String(startId) : '';
   var stoppedEarly = false;
   var stopReason = '';
+
+  // Pass channelId through options for message link building
+  opt.channelId = channelId;
 
   // 0) If inclusive: try to fetch/process the start message itself
   if (inclusive && startId) {
@@ -795,7 +847,6 @@ function pollAndProcessFromId(channelId, startId, opt) {
       var msg = page[i];
       try {
         var res = processOneDiscordMessage(msg, startTime, opt);
-        processed++;
         if (res && res.updated) {
           updatedPairs += res.updated;
           if (res.tentative) tentativeCount++;
@@ -804,6 +855,12 @@ function pollAndProcessFromId(channelId, startId, opt) {
         lastId = String(msg.id || lastId);
       } catch (e) {
         errors.push('process ' + String(msg && msg.id) + ': ' + String(e && e.message || e));
+      } finally {
+        // Always increment processed count, whether success, skip, or error
+        processed++;
+        if (DEBUG_PARSER && typeof logToSheet === 'function') {
+          logToSheet(`📈 Processed count incremented to: ${processed}`);
+        }
       }
     }
 
@@ -868,9 +925,14 @@ function processOneDiscordMessage(msg, startTime, options) {
   let raw = null;
   let isTentative = false;
   let isRematch = false;
+  let updateResult = null;  // Declare here so it's accessible throughout the function
   try {
     raw = msg.content;
-    sendLog(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 100)}..."`);
+
+    // Log raw message to sheet only (verbose)
+    if (typeof logToSheet === 'function') {
+      logToSheet(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 100)}..."`);
+    }
 
     // Extract timestamp from Discord message (if available)
     var messageDate = null;
@@ -891,7 +953,11 @@ function processOneDiscordMessage(msg, startTime, options) {
     }
 
     parsed = parseScheduleMessage_v3(raw, messageDate);
-    sendLog(`🧪 Parsed: ${JSON.stringify(parsed)}`);
+
+    // Log parsed result to sheet only (not Discord - too verbose)
+    if (typeof logToSheet === 'function') {
+      logToSheet(`🧪 Parsed: ${JSON.stringify(parsed)}`);
+    }
 
     if (!parsed || !parsed.ok || !parsed.team1 || !parsed.team2 || !parsed.division) {
       sendLog(`⚠️ Skipped message ID: ${msg?.id} — unable to parse.`);
@@ -905,18 +971,32 @@ function processOneDiscordMessage(msg, startTime, options) {
     logMatchToWMLog(parsed, msg.author?.id || msg.authorId, msg.channel?.name || msg.channelName || msg.channel, isTentative, isRematch);
 
     // Update tables: find row, update store, refresh Discord board
-    let updateResult = null;
     try {
       if (typeof updateTablesMessageFromPairs === 'function' && parsed.pairs && parsed.weekKey) {
         updateResult = updateTablesMessageFromPairs(parsed.weekKey, parsed.pairs, options);
 
         if (updateResult.updated > 0) {
-          sendLog(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>`);
+          // Build message link if possible
+          var messageLink = '';
+          // Try multiple ways to get channel ID: direct property, nested object, or from options
+          var channelId = msg.channel_id || (msg.channel && msg.channel.id) || options.channelId || (typeof SCHED_INPUT_CHANNEL_ID !== 'undefined' ? SCHED_INPUT_CHANNEL_ID : '');
+
+          // Debug logging to troubleshoot link building
+          if (typeof logToSheet === 'function') {
+            logToSheet(`🔗 Link debug: channelId="${channelId}", msg.id="${msg.id}", msg.channel_id="${msg.channel_id}", options.channelId="${options.channelId}"`);
+          }
+
+          if (channelId && msg.id && typeof buildDiscordMessageLink === 'function') {
+            var link = buildDiscordMessageLink(channelId, msg.id);
+            if (typeof logToSheet === 'function') {
+              logToSheet(`🔗 Built link: "${link}"`);
+            }
+            if (link) messageLink = ` • [Jump to message](${link})`;
+          }
+          sendLog(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`);
         }
 
-        if (updateResult.skipped && updateResult.skipped > 0) {
-          sendLog(`⏭️ Skipped ${updateResult.skipped} already-scheduled match(es)`);
-        }
+        // Note: Skip logging is handled verbosely in 70_updates.gs (shows team names)
 
         if (updateResult.unmatched && updateResult.unmatched.length > 0) {
           const reasons = updateResult.unmatched.map(u => u.reason).join(', ');
@@ -933,8 +1013,11 @@ function processOneDiscordMessage(msg, startTime, options) {
     return { updated: 0 };
   }
 
+  // Only count as updated if we actually scheduled something (not skipped/unmatched)
+  var actuallyUpdated = (updateResult && updateResult.updated > 0) ? 1 : 0;
+
   return {
-    updated: 1,
+    updated: actuallyUpdated,
     tentative: isTentative,
     parsed: parsed
   };
@@ -963,8 +1046,14 @@ function parseScheduleMessage_v3(text, messageDate) {
     if (hintDiv) trace.push('hintDiv=' + hintDiv);
     if (hintMap) trace.push('hintMap=' + hintMap);
 
+    // Strip map hint from text before splitting teams (prevents "dod_railyard_b6 NoGo" being treated as team name)
+    var cleanedForTeams = stripMapHint(cleaned);
+    if (cleanedForTeams !== cleaned && typeof logToSheet === 'function') {
+      logToSheet(`🗺️ Stripped map from text: "${cleaned}" → "${cleanedForTeams}"`);
+    }
+
     // teams
-    var sides = splitVsSides(cleaned);
+    var sides = splitVsSides(cleanedForTeams);
     if (!sides || !sides.a || !sides.b) {
       return { ok: false, error: 'no_vs', trace: trace };
     }
