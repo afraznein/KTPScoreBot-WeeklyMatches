@@ -292,6 +292,41 @@ function truncate(s, n) { s = String(s || ''); return (s.length > n) ? (s.slice(
 function padCenter(s, n) {s = String(s || ''); var k = Math.max(0, n - s.length), L = Math.floor(k / 2), R = k - L;  return (L ? Array(L + 1).join(' ') : '') + s + (R ? Array(R + 1).join(' ') : '');}
 
 /**
+ * Pad scheduled time with ET-aligned formatting (time right-aligned, date left-aligned).
+ * Normalizes all timestamps to same width so "ET" aligns vertically, then centers the result.
+ * @param {string} s - Scheduled time string (e.g., "8:00 PM ET 9/21" or "TBD")
+ * @param {number} n - Target width (typically 22 for scheduled column)
+ * @returns {string} Padded string with ET-aligned formatting
+ */
+function padScheduled(s, n) {
+  s = String(s || '');
+  if (s.indexOf(' ET ') === -1) {
+    // No timezone, use center padding (e.g., "TBD")
+    return padCenter(s, n);
+  }
+
+  // Split on " ET " and normalize to fixed widths
+  var parts = s.split(' ET ');
+  if (parts.length !== 2) return padCenter(s, n);
+
+  var timePart = parts[0];  // e.g., "8:00 PM" or "10:00 PM"
+  var datePart = parts[1];  // e.g., "9/21" or "12/31"
+
+  // Normalize to fixed widths so "ET" is always at same position
+  var timeWidth = 8;  // "10:00 PM" = 8 chars max
+  var dateWidth = 5;  // "12/31" = 5 chars max
+  // Normalized string = 8 + 4 (" ET ") + 5 = 17 chars
+
+  var paddedTime = padLeft(timePart, timeWidth);   // Right-align time
+  var paddedDate = padRight(datePart, dateWidth);  // Left-align date
+
+  var normalized = paddedTime + ' ET ' + paddedDate;  // Always 17 chars
+
+  // Center the normalized string in the column
+  return padCenter(normalized, n);
+}
+
+/**
  * Get column widths used by all tables.
  * COL1 = "Home vs Away" column width, COL2 = "Scheduled", COL3 = "Shoutcaster"
  * @returns {Object} {COL1: 43, COL2: 22, COL3: 12}

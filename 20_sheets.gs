@@ -416,11 +416,12 @@ function getMakeupMatchesAllDivs(week) {
 
       for (var r = 0; r < band.length; r++) {
         var row = band[r];
-        // [B,  C,   D,  E,  F,   G,   H]
-        // [wl1,home,sc1, -, wl2, away, sc2]
+        // [B,  C,   D,  E,        F,   G,   H]
+        // [wl1,home,sc1,scheduled,wl2, away, sc2]
         var wl1 = row[0];
         var home = String(row[1] || '').trim();
         var sc1 = row[2];
+        var scheduled = String(row[3] || '').trim();  // Column E (scheduled time)
         var wl2 = row[4];
         var away = String(row[5] || '').trim();
         var sc2 = row[6];
@@ -436,6 +437,7 @@ function getMakeupMatchesAllDivs(week) {
         var played = finishedByScore || finishedByWLT;
 
         if (!played) {
+          var actualRow = firstGridRow + r;  // Absolute row number in sheet
           out.push({
             division: division,
             mapRef: mapRef || '',
@@ -443,7 +445,9 @@ function getMakeupMatchesAllDivs(week) {
             away: away,
             date: dft,
             dateIso: Utilities.formatDate(dft, tz, 'yyyy-MM-dd'),
-            weekLabel: label || ''
+            weekLabel: label || '',
+            scheduled: scheduled || '',  // Scheduled time from column E
+            rowIndex: actualRow  // Sheet row number for store lookups
           });
         }
       }

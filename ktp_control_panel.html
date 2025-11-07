@@ -306,6 +306,32 @@
         <div class="row">
         </div>
       </div>
+
+      <!-- Clear Week-Specific IDs -->
+      <div class="card" style="grid-column: span 6;">
+        <h2>🗑️ Clear Week-Specific Message IDs</h2>
+        <div class="footer-note">
+          Clear stored Discord message IDs for specific weeks (useful when messages were manually deleted).
+        </div>
+        <div class="row">
+          <button id="btnLoadWeeks" class="btn">🔄 Load Weeks with Stored IDs</button>
+        </div>
+        <div class="row">
+          <label for="weekSelect">Select Week</label>
+          <select id="weekSelect" style="flex: 1;">
+            <option value="">-- Load weeks first --</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Stored IDs:</label>
+          <div id="weekIdInfo" style="font-size: 11px; color: var(--muted); font-family: monospace; line-height: 1.4;">
+            Select a week to see stored IDs
+          </div>
+        </div>
+        <div class="row">
+          <button id="btnClearWeekIds" class="btn danger" disabled>Clear Selected Week's IDs</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -678,6 +704,96 @@
         setBusy(false);
       }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
       .server_resetMsgIdsForCurrent(secret);
+    };
+
+    // Week-specific ID management
+    let weeksData = []; // Store loaded weeks data
+
+    $('btnLoadWeeks').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('❌ Missing secret','err'); return; }
+
+      setBusy(true, 'Loading weeks…');
+      out('▶ Loading weeks with stored message IDs…');
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok && res.data && res.data.weeks) {
+          weeksData = res.data.weeks;
+          const select = $('weekSelect');
+          select.innerHTML = '<option value="">-- Select a week --</option>';
+
+          if (weeksData.length === 0) {
+            select.innerHTML = '<option value="">-- No weeks with stored IDs --</option>';
+            out('ℹ️ No weeks found with stored message IDs', 'ok');
+          } else {
+            weeksData.forEach(w => {
+              const option = document.createElement('option');
+              option.value = w.weekKey;
+              option.textContent = w.weekKey;
+              select.appendChild(option);
+            });
+            out(`✅ Loaded ${weeksData.length} week(s) with stored IDs`, 'ok');
+          }
+
+          $('weekIdInfo').textContent = 'Select a week to see stored IDs';
+          $('btnClearWeekIds').disabled = true;
+        } else {
+          out('❌ ' + (res && res.error), 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_listWeeksWithMessageIds(secret);
+    };
+
+    $('weekSelect').onchange = () => {
+      const weekKey = $('weekSelect').value;
+      if (!weekKey) {
+        $('weekIdInfo').textContent = 'Select a week to see stored IDs';
+        $('btnClearWeekIds').disabled = true;
+        return;
+      }
+
+      const week = weeksData.find(w => w.weekKey === weekKey);
+      if (week && week.ids) {
+        const lines = [];
+        if (week.ids.header) lines.push(`Header: ${week.ids.header}`);
+        if (week.ids.table) lines.push(`Table: ${week.ids.table}`);
+        if (week.ids.rematch) lines.push(`Rematch: ${week.ids.rematch}`);
+
+        $('weekIdInfo').innerHTML = lines.length > 0 ? lines.join('<br>') : 'No IDs found';
+        $('btnClearWeekIds').disabled = false;
+      } else {
+        $('weekIdInfo').textContent = 'No IDs found for this week';
+        $('btnClearWeekIds').disabled = true;
+      }
+    };
+
+    $('btnClearWeekIds').onclick = () => {
+      const weekKey = $('weekSelect').value;
+      if (!weekKey) { out('❌ No week selected','err'); return; }
+
+      if (!confirm(`⚠️ Clear stored message IDs for week "${weekKey}"?\n\nThis will force new Discord messages to be created next time this week is updated.`)) {
+        out('❌ Clear cancelled', 'err');
+        return;
+      }
+
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('❌ Missing secret','err'); return; }
+
+      setBusy(true, `Clearing IDs for ${weekKey}…`);
+      out(`▶ Clearing message IDs for week ${weekKey}…`);
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok) {
+          out(`✅ Cleared IDs for ${weekKey}`, 'ok');
+          // Reload the week list
+          $('btnLoadWeeks').click();
+        } else {
+          out('❌ ' + (res && res.error), 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_resetMsgIdsForWeek(secret, weekKey);
     };
 
     // Debug dock controls

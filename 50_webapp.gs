@@ -237,7 +237,7 @@ function server_setDebugParser(secret, enabled) {
 function server_getState() {
   try {
     const state = {
-      lastStartId: getProp('LAST_SCHED_MSG_ID', ''),
+      lastStartId: getPointer(),  // Read from DISCORD_LAST_POINTER (same key setPointer() writes to)
       schedChannel: getProp('SCHED_INPUT_CHANNEL_ID', ''),
       weeklyChannel: getProp('WEEKLY_POST_CHANNEL_ID', ''),
       resultsChannel: getProp('RESULTS_LOG_CHANNEL_ID', '')
@@ -259,7 +259,7 @@ function server_setStartId(secret, id) {
     checkSecret(secret);
     const snowflake = String(id || '').trim();
     if (!/^\d{5,30}$/.test(snowflake)) throw new Error('Invalid message id');
-    props().setProperty('LAST_SCHED_MSG_ID', snowflake);
+    setPointer(snowflake);  // Use setPointer() for consistency with parser
     return ok({ id: snowflake });
   } catch (e) {
     return error(e);
@@ -274,7 +274,7 @@ function server_setStartId(secret, id) {
 function server_clearStartId(secret) {
   try {
     checkSecret(secret);
-    props().deleteProperty('LAST_SCHED_MSG_ID');
+    props().deleteProperty(pointerKey());  // Use pointerKey() for consistency with parser
     return ok({ cleared: true });
   } catch (e) {
     return error(e);
@@ -344,6 +344,79 @@ function server_resetWeeklyMsgIds(secret) {
  */
 function server_resetMsgIdsForCurrent(secret) {
   return server_resetWeeklyMsgIds(secret);
+}
+
+/**
+ * List all weeks that have stored Discord message IDs.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {weeks: [{weekKey, ids: {header, table, rematch}}]}} or {ok: false, error}
+ */
+function server_listWeeksWithMessageIds(secret) {
+  try {
+    checkSecret(secret);
+
+    var props = PropertiesService.getScriptProperties();
+    var allProps = props.getProperties();
+    var weeks = [];
+
+    // Find all WEEKLY_MSG_IDS:: keys
+    for (var key in allProps) {
+      if (key.indexOf('WEEKLY_MSG_IDS::') === 0) {
+        var weekKey = key.replace('WEEKLY_MSG_IDS::', '');
+        var ids = (typeof loadMsgIds === 'function') ? loadMsgIds(weekKey) : {};
+
+        // Only include if there are actual IDs stored
+        if (ids.header || ids.table || ids.rematch) {
+          weeks.push({
+            weekKey: weekKey,
+            ids: {
+              header: ids.header || '',
+              table: ids.table || '',
+              rematch: ids.rematch || ''
+            }
+          });
+        }
+      }
+    }
+
+    // Sort by weekKey (newest first)
+    weeks.sort(function(a, b) {
+      return b.weekKey > a.weekKey ? 1 : (b.weekKey < a.weekKey ? -1 : 0);
+    });
+
+    return ok({ weeks: weeks });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Clear stored message IDs and hashes for a specific week.
+ * Useful when Discord messages were manually deleted but IDs are still stored.
+ * @param {string} secret - Authentication secret
+ * @param {string} weekKey - Week key in format "YYYY-MM-DD|mapname"
+ * @returns {Object} {ok: true, data: {weekKey, cleared: true, prevIds}} or {ok: false, error}
+ */
+function server_resetMsgIdsForWeek(secret, weekKey) {
+  try {
+    checkSecret(secret);
+    if (!weekKey || typeof weekKey !== 'string' || weekKey.indexOf('|') < 0) {
+      throw new Error('Invalid weekKey format (expected "YYYY-MM-DD|mapname")');
+    }
+
+    var before = (typeof loadMsgIds === 'function') ? loadMsgIds(weekKey) : {};
+    if (typeof clearMsgIds === 'function') clearMsgIds(weekKey);
+
+    // Also clear the content hashes so next post forces create
+    var hashKey = 'WEEKLY_MSG_HASHES::' + weekKey;
+    var remKey = 'WEEKLY_REMATCH_HASH::' + weekKey;
+    PropertiesService.getScriptProperties().deleteProperty(hashKey);
+    PropertiesService.getScriptProperties().deleteProperty(remKey);
+
+    return ok({ weekKey: weekKey, cleared: true, prevIds: before });
+  } catch (e) {
+    return error(e);
+  }
 }
 
 /**

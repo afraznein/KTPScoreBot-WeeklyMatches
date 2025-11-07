@@ -20,10 +20,30 @@
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.6.0
+ * Version: 3.6.3
  * Last Updated: 2025-11-06
  *
  * CHANGELOG:
+ * v3.6.3 (2025-11-06) - BUGFIX: Parser now strips filler words before times
+ *                     - Added "default", "usual", "normal", "regular", "standard", "typical" to strip list
+ *                     - Fixes "emo // clanx default 9pm" being parsed as team "clanx default"
+ *                     - Team names are now correctly extracted without trailing filler words
+ * v3.6.2 (2025-11-06) - ENHANCEMENT: Rematches now display scheduled times (not hardcoded TBD)
+ *                     - getMakeupMatchesAllDivs() now reads column E (scheduled time) and rowIndex
+ *                     - renderRematchesTableBody() displays actual scheduled times for rematches
+ *                     - Rematch scheduled times use same ET-aligned formatting as weekly tables
+ *                     - ENHANCEMENT: Improved ET-aligned time formatting (centered timestamp)
+ *                     - padScheduled() now normalizes timestamps to 17 chars then centers in column
+ *                     - All times display with "ET" vertically aligned and timestamp centered
+ *                     - Format: "  8:00 PM ET 9/28  " (8 char time + " ET " + 5 char date, centered)
+ * v3.6.1 (2025-11-06) - ENHANCEMENT: ET-aligned scheduled times for improved readability
+ *                     - Added padScheduled() function to align all times on "ET" timezone
+ *                     - Times now display with consistent "ET" position: " 8:00 PM ET 9/28"
+ *                     - Improves visual scanning of match schedules in Discord tables
+ *                     - BUGFIX: Fixed last processed message ID not updating in control panel
+ *                     - server_getState() now reads from DISCORD_LAST_POINTER (same key parser writes to)
+ *                     - server_setStartId() and server_clearStartId() now use pointer helper functions
+ *                     - Control panel "Last Processed Message ID" now updates after each batch
  * v3.6.0 (2025-11-06) - FEATURE: Scheduled times now display in Discord tables (replaces TBD)
  *                     - Discord tables read from column E and store.sched to show actual match times
  *                     - Added scheduled field and rowIndex to getMatchesForDivisionWeek()
@@ -118,7 +138,7 @@
  *                     - Automatic weekly board posting
  */
 
-const VERSION = '3.6.0';
+const VERSION = '3.6.3';
 const VERSION_DATE = '2025-11-06';
 
 // ---- DEBUG SETTINGS ----

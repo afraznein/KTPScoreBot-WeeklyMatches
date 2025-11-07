@@ -20,6 +20,9 @@
 // Total: 10 functions
 // =======================
 
+// Track which weeks have been logged in this execution to avoid duplicate logs
+var _renderedWeeksThisExecution = _renderedWeeksThisExecution || {};
+
 // ----- Create Weekly Tables -----
 
 /**
@@ -56,6 +59,17 @@ function upsertWeeklyDiscordMessage(week) {
   var store = (typeof loadWeekStore === 'function') ? loadWeekStore(wkKey) : null;
   var header = (typeof renderHeaderEmbedPayload === 'function') ? renderHeaderEmbedPayload(week) : { embeds: [] };
 
+  // Diagnostic: log header creation for debugging (once per week per execution)
+  var isFirstRenderThisExecution = !_renderedWeeksThisExecution[wkKey];
+  if (isFirstRenderThisExecution) {
+    _renderedWeeksThisExecution[wkKey] = true;
+
+    if (typeof sendLog === 'function' && header && header.embeds && header.embeds.length > 0) {
+      var headerTitle = (header.embeds[0] && header.embeds[0].title) ? header.embeds[0].title : 'No title';
+      sendLog(`📋 Rendering week ${wkKey} with header: "${headerTitle}"`);
+    }
+  }
+
   // ======== build Weekly Tables body (prefer your working functions) ========
   var weeklyBody = '';
   if (typeof renderWeeklyTablesBody === 'function') {
@@ -75,11 +89,36 @@ function upsertWeeklyDiscordMessage(week) {
     }
   }
 
-  // ======== build Rematches (raw; chunk later) ========
+  // Diagnostic: check if weeklyBody was generated (once per week)
+  if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+    if (weeklyBody && weeklyBody.length > 0) {
+      sendLog(`📊 Generated weekly tables body (${weeklyBody.length} chars) for week ${wkKey}`);
+    } else {
+      sendLog(`⚠️ No weekly tables body generated for week ${wkKey}`);
+    }
+  }
+
+  // ======== build Rematches (only for current/upcoming week) ========
   var remBody = '';
-  if (typeof renderRematchesTableBody === 'function') {
-    remBody = String(renderRematchesTableBody(week) || '');
+  var isCurrentWeek = false;
+
+  // Check if this is the current/upcoming week
+  if (typeof getAlignedUpcomingWeekOrReport === 'function') {
+    var currentWeek = getAlignedUpcomingWeekOrReport();
+    if (currentWeek && currentWeek.weekKey) {
+      isCurrentWeek = (String(currentWeek.weekKey) === String(wkKey));
+    } else if (currentWeek && currentWeek.date) {
+      var currentWkKey = (typeof weekKey === 'function') ? weekKey(currentWeek) : '';
+      isCurrentWeek = (String(currentWkKey) === String(wkKey));
+    }
+  }
+
+  // Only render rematches for the current week
+  if (isCurrentWeek && typeof renderRematchesTableBody === 'function') {
+    remBody = String(renderRematchesTableBody(week, store) || '');
     remBody = stripFence(remBody.trim());
+  } else if (!isCurrentWeek && isFirstRenderThisExecution && typeof sendLog === 'function') {
+    sendLog(`⏭️ Skipping rematches for historical week ${wkKey} (only shown on current week)`);
   }
 
   var ids = loadMsgIds(wkKey);  // expects {header, table, rematch, tables[], rematches[]}
@@ -106,12 +145,21 @@ function upsertWeeklyDiscordMessage(week) {
     if (!ids.header) {
       ids.header = postChannelMessageAdvanced(channelId, '', header.embeds);
       actionHeader = ids.header ? 'created' : 'noop';
+      if (isFirstRenderThisExecution && typeof sendLog === 'function' && ids.header) {
+        sendLog(`📝 Created header embed for week ${wkKey} (ID: ${ids.header})`);
+      }
     } else if (prevHeaderHash !== headerHash) {
       editChannelMessageAdvanced(channelId, ids.header, '', header.embeds);
       actionHeader = 'edited';
+      if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+        sendLog(`✏️ Edited header embed for week ${wkKey} (ID: ${ids.header})`);
+      }
     }
   } catch (e) {
     // create once if edit path failed (bad id)
+    if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+      sendLog(`⚠️ Header edit failed for ${wkKey}, creating new: ${e.message}`);
+    }
     ids.header = postChannelMessageAdvanced(channelId, '', header.embeds);
     actionHeader = ids.header ? 'created' : 'noop';
   }
@@ -120,15 +168,41 @@ function upsertWeeklyDiscordMessage(week) {
   if (weeklyBody) {
     try {
       if (!ids.table) {
+        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+          sendLog(`📝 Creating new table message for week ${wkKey}...`);
+        }
         ids.table = postChannelMessage(channelId, weeklyBody);
         actionWeekly = ids.table ? 'created' : 'noop';
+        if (isFirstRenderThisExecution && typeof sendLog === 'function' && ids.table) {
+          sendLog(`✅ Created table message for week ${wkKey} (ID: ${ids.table})`);
+        }
       } else if (prevWeeklyHash !== weeklyHash) {
+        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+          sendLog(`✏️ Editing existing table message ${ids.table} for week ${wkKey}...`);
+        }
         editChannelMessage(channelId, ids.table, weeklyBody);
         actionWeekly = 'edited';
+        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+          sendLog(`✅ Edited table message for week ${wkKey}`);
+        }
+      } else {
+        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+          sendLog(`⏭️ Table unchanged for week ${wkKey}, skipping update`);
+        }
       }
     } catch (e) {
+      if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+        sendLog(`⚠️ Table operation failed for ${wkKey}, creating new: ${e.message}`);
+      }
       ids.table = postChannelMessage(channelId, weeklyBody);
       actionWeekly = ids.table ? 'created' : 'noop';
+      if (isFirstRenderThisExecution && typeof sendLog === 'function' && ids.table) {
+        sendLog(`✅ Created replacement table message (ID: ${ids.table})`);
+      }
+    }
+  } else {
+    if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+      sendLog(`⏭️ No weekly body to post for week ${wkKey}`);
     }
   }
   // 3) Rematches — create if missing, else edit if changed, or delete if now gone
@@ -278,7 +352,9 @@ function renderDivisionCurrentTable(division, week, store, mapName) {
     var away = m ? m[2].trim() : '';
 
     var vsCell = formatVsCell(home, away, W.COL1);
-    var row = vsCell + ' | ' + padRight(sched, W.COL2) + ' | ' + padRight(cast, W.COL3);
+    // Use padScheduled() for ET-aligned formatting
+    var schedCell = (typeof padScheduled === 'function') ? padScheduled(sched, W.COL2) : padRight(sched, W.COL2);
+    var row = vsCell + ' | ' + schedCell + ' | ' + padRight(cast, W.COL3);
     outRows.push(row);
   }
 
@@ -386,9 +462,8 @@ function renderTablesPages(week, store) {
     if (block && /\S/.test(block)) chunks.push(block);
   }
 
-  // inside renderTablesPages(week, store) AFTER the three current week tables:
-  var makeupsArr = (typeof getMakeupMatchesAllDivs === 'function') ? getMakeupMatchesAllDivs(week) : [];
-  var remBody = (typeof renderRematchesTableBody === 'function') ? renderRematchesTableBody(makeupsArr) : '';
+  // Render rematches table with store data for scheduled times
+  var remBody = (typeof renderRematchesTableBody === 'function') ? renderRematchesTableBody(week, store) : '';
 
   // IFF No Rematches Table, post this
   if (!remBody || !/\S/.test(remBody)) { weeklyBody += EMOJI_KTP + '\n\n_No rematches pending for this week._' + EMOJI_KTP; }
@@ -449,7 +524,9 @@ function renderDivisionWeekTable(division, matches, store) {
       scheduledText = m.scheduled;
     }
 
-    rows.push(vs + ' | ' + padCenter(scheduledText, W.COL2) + ' | ' + padCenter('-', W.COL3));
+    // Use padScheduled() for ET-aligned formatting (aligns timezone vertically)
+    var schedCell = (typeof padScheduled === 'function') ? padScheduled(scheduledText, W.COL2) : padCenter(scheduledText, W.COL2);
+    rows.push(vs + ' | ' + schedCell + ' | ' + padCenter('-', W.COL3));
   }
   if (!rows.length) return '';
 
@@ -486,10 +563,12 @@ function renderWeeklyTablesBody(week, store) {
 /**
  * Single combined rematches table (one code fence).
  * Grouped by map → division; banner lines centered on the first '|' divider.
+ * @param {Object} week - Week object (optional, used for store lookup)
+ * @param {Object} store - Week store with schedule data (optional)
  * @returns {string} Rendered rematches table body with code fence or empty string
  */
-function renderRematchesTableBody() {
-  var makeups = getMakeupMatchesAllDivs();
+function renderRematchesTableBody(week, store) {
+  var makeups = (typeof getMakeupMatchesAllDivs === 'function') ? getMakeupMatchesAllDivs(week) : [];
   makeups = Array.isArray(makeups) ? makeups.slice() : [];
   if (!makeups.length) return '';
 
@@ -572,7 +651,13 @@ function renderRematchesTableBody() {
       out.push(centerAtDivider(div)); // division banner centered on the divider
     }*/
 
-    var row = vsCell(it.home, it.away) + ' | ' + padCenter('TBD', W.COL2) + ' | ' + padCenter('-', W.COL3);
+    // Get scheduled time from column E (already read by getMakeupMatchesAllDivs)
+    // Note: rematches are from past weeks, so current week's store won't have data
+    var schedText = it.scheduled || 'TBD';
+
+    // Use padScheduled() for ET-aligned formatting
+    var schedCell = (typeof padScheduled === 'function') ? padScheduled(schedText, W.COL2) : padCenter(schedText, W.COL2);
+    var row = vsCell(it.home, it.away) + ' | ' + schedCell + ' | ' + padCenter('-', W.COL3);
     out.push(row);
   }
 

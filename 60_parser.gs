@@ -226,6 +226,9 @@ function splitVsSides(s) {
   a = a.replace(/^the\s+/i, '').replace(/[!?.]+$/, '').trim();
   b = b.replace(/^the\s+/i, '').replace(/[!?.;]+$/, '').trim();
 
+  // Strip common filler words used before times (e.g., "default 9pm", "usual time", "normal time")
+  a = a.replace(/\b(default|usual|normal|regular|standard|typical)\b.*$/i, '').trim();
+  b = b.replace(/\b(default|usual|normal|regular|standard|typical)\b.*$/i, '').trim();
 
   return { a: a, b: b };
 }
@@ -594,7 +597,7 @@ function findWeekByMapAndPair(division, map, home, away, weekList) {
 
 /**
  * Helper function to find week by date and team pair.
- * Finds the FIRST week (chronologically) that has this matchup and is on/after the target date.
+ * Finds the week CLOSEST to the target date that has this matchup (for historical parsing).
  * @param {string} division - Division name
  * @param {Date} dateObj - Date object to match against
  * @param {string} home - Home team name
@@ -608,7 +611,7 @@ function findWeekByDateAndPair(division, dateObj, home, away, weekList) {
   var targetTime = dateObj.getTime();
   var candidates = [];
 
-  // Find all weeks with this matchup that are on/after the target date
+  // Find all weeks with this matchup
   for (var i = 0; i < weekList.length; i++) {
     var w = weekList[i];
     if (w.division !== division) continue;
@@ -617,22 +620,30 @@ function findWeekByDateAndPair(division, dateObj, home, away, weekList) {
     var weekDate = new Date(w.defaultDate || w.date);
     var weekTime = weekDate.getTime();
 
-    // Allow up to 7 days before for flexibility (message posted same week as match)
-    var sevenDaysBefore = targetTime - (7 * 24 * 60 * 60 * 1000);
-    if (weekTime >= sevenDaysBefore) {
-      candidates.push({
-        week: w,
-        weekTime: weekTime
-      });
-    }
+    // Calculate time distance from target date (absolute value)
+    var timeDiff = Math.abs(weekTime - targetTime);
+
+    candidates.push({
+      week: w,
+      weekTime: weekTime,
+      timeDiff: timeDiff
+    });
   }
 
   if (candidates.length === 0) return null;
 
-  // Sort chronologically and return the FIRST upcoming week
+  // Sort by CLOSEST to target date (smallest time difference)
   candidates.sort(function(a, b) {
-    return a.weekTime - b.weekTime;
+    return a.timeDiff - b.timeDiff;
   });
+
+  if (DEBUG_PARSER && typeof sendLog === 'function') {
+    var chosen = candidates[0];
+    var chosenDate = new Date(chosen.weekTime);
+    var targetDate = new Date(targetTime);
+    var daysDiff = Math.round(chosen.timeDiff / (24 * 60 * 60 * 1000));
+    sendLog(`✅ Chose week ${daysDiff} days from target date (${targetDate.toISOString().slice(0, 10)} → ${chosenDate.toISOString().slice(0, 10)})`);
+  }
 
   return candidates[0].week;
 }
@@ -657,8 +668,7 @@ function findPastUnplayedWeekForPair(division, home, away, weekList) {
 
 /**
  * Find week for a team pair based on Discord message timestamp.
- * Finds the FIRST upcoming week (>= message date) that has this matchup.
- * This handles the common case where captains post schedules before the match week.
+ * Finds the week CLOSEST to the message date that has this matchup (for historical parsing).
  * Used as fallback when message has no map/date hints.
  * @param {string} division - Division name
  * @param {Date} messageDate - Date when the Discord message was posted
@@ -677,7 +687,7 @@ function findWeekByMessageTime(division, messageDate, home, away, weekList) {
     sendLog(`🔍 findWeekByMessageTime: Looking for ${home} vs ${away} in ${division}, total weeks: ${weekList.length}`);
   }
 
-  // Find all weeks with this matchup in the division that are >= message date
+  // Find all weeks with this matchup in the division
   for (var i = 0; i < weekList.length; i++) {
     var wk = weekList[i];
     if (wk.division !== division) continue;
@@ -694,23 +704,29 @@ function findWeekByMessageTime(division, messageDate, home, away, weekList) {
     var weekDate = new Date(wk.defaultDate || wk.date);
     var weekTime = weekDate.getTime();
 
-    // Only consider weeks that are on/after the message date (captains schedule ahead)
-    // Allow up to 7 days in the past for messages posted during the week
-    var sevenDaysAgo = msgTime - (7 * 24 * 60 * 60 * 1000);
-    if (weekTime >= sevenDaysAgo) {
-      candidates.push({
-        week: wk,
-        weekTime: weekTime
-      });
-    }
+    // Calculate time distance from message date (absolute value)
+    var timeDiff = Math.abs(weekTime - msgTime);
+
+    candidates.push({
+      week: wk,
+      weekTime: weekTime,
+      timeDiff: timeDiff
+    });
   }
 
   if (candidates.length === 0) return null;
 
-  // Sort chronologically and return the FIRST upcoming week with this matchup
+  // Sort by CLOSEST to message date (smallest time difference)
   candidates.sort(function(a, b) {
-    return a.weekTime - b.weekTime;
+    return a.timeDiff - b.timeDiff;
   });
+
+  if (DEBUG_PARSER && typeof sendLog === 'function') {
+    var chosen = candidates[0];
+    var chosenDate = new Date(chosen.weekTime);
+    var daysDiff = Math.round(chosen.timeDiff / (24 * 60 * 60 * 1000));
+    sendLog(`✅ Chose week ${daysDiff} days from message date: ${chosenDate.toISOString().slice(0, 10)}`);
+  }
 
   return candidates[0].week;
 }
