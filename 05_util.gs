@@ -128,6 +128,8 @@ function normalizeMap(s) {
 function normalizeTeamText(s) {
   return String(s || '')
     .toLowerCase()
+    .replace(/['']s\b/g, 's')    // Handle possessive with both ASCII and curly apostrophes: "Wicked's" or "Wicked's" → "Wickeds"
+    .replace(/\s*['']['\s]*s\b/g, 's')  // Handle spaced possessives: "Wicked ' s" → "Wickeds"
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

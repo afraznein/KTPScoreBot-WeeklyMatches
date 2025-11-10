@@ -159,6 +159,12 @@ function stripMapHint(text) {
   var dodPattern = /\bdod_[a-z0-9_]+\b/gi;
   t = t.replace(dodPattern, ' ').replace(/\s+/g, ' ').trim();
 
+  // Additional fallback: Remove common DoD map name prefixes when they appear before team names
+  // Matches common map names like "Railyard", "Railroad", "Anjou", etc. when followed by a team name
+  // This helps when map isn't in catalog yet or captain uses shorthand
+  var commonMapNames = /\b(railyard|railroad|harrington||anzio|solitude|anjou|lennon|armory|aleutian|saints?|push)\b/gi;
+  t = t.replace(commonMapNames, ' ').replace(/\s+/g, ' ').trim();
+
   return t;
 }
 
@@ -254,11 +260,17 @@ function splitVsSides(s) {
   a = a.replace(/^(bronze|silver|gold)\s*:?\s*/i, '').trim();
   b = b.replace(/^(bronze|silver|gold)\s*:?\s*/i, '').trim();
 
+  // Strip everything after a slash when used as separator (not part of a date)
+  // Example: "GVMH / week 4 armory / 3pm est" → "GVMH"
+  // But preserve dates like "10/12" by checking if slash is surrounded by whitespace
+  b = b.replace(/\s+\/\s+.*$/i, '').trim(); // Matches " / " with spaces around it
+
   // Strip common date/time patterns from side B
-  // Patterns: "Sunday 11/2", "9:00 EST", "26/10 21h", "9pm EDT", etc.
-  b = b.replace(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b.*/i, '').trim();
+  // Patterns: "Sunday 11/2", "9:00 EST", "26/10 21h", "9pm EDT", "October 5th", etc.
+  b = b.replace(/\b(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b.*/i, '').trim();
+  b = b.replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}.*/i, '').trim(); // Month + day like "October 5th"
   b = b.replace(/\b\d{1,2}[:/]\d{1,2}.*$/i, '').trim(); // Times like 9:00, 21h
-  b = b.replace(/\b\d{1,2}\s*(am|pm|est|edt|cet|brt).*$/i, '').trim(); // 9pm EST, 4pm est
+  b = b.replace(/\b\d{1,2}\s*(am|pm|est|edt|et|cet|brt).*$/i, '').trim(); // 9pm EST, 4pm est
   b = b.replace(/\b\d{1,2}\/\d{1,2}.*$/i, '').trim(); // Dates like 26/10, 11/2
 
   // Strip trailing punctuation and lowercase 'the'
@@ -343,6 +355,10 @@ function matchTeam(snippet, forcedDivision) {
     var t = idx.teams[i];
     if (forcedDivision && String(t.division || '').toLowerCase() !== String(forcedDivision || '').toLowerCase()) continue;
 
+    // Skip template teams (BRONZE A, BRONZE B, ..., BRONZE N, SILVER A, etc.)
+    // Template teams follow pattern: "<DIVISION> <SINGLE_LETTER>"
+    var templatePattern = /^(bronze|silver|gold)\s+[a-z]$/i;
+    if (templatePattern.test(t.name)) continue;
 
     var cand = normalizeTeamText(t.name);
     var sc = scoreTeamMatch(s, cand);
@@ -1068,7 +1084,14 @@ function processOneDiscordMessage(msg, startTime, options) {
     }
 
     if (!parsed || !parsed.ok || !parsed.team1 || !parsed.team2 || !parsed.division) {
-      sendLog(`⚠️ Skipped message ID: ${msg?.id} — unable to parse.`);
+      // Build Discord message link for the skipped message
+      var skipMessageLink = '';
+      var skipChannelId = msg.channel_id || (msg.channel && msg.channel.id) || options.channelId || (typeof SCHED_INPUT_CHANNEL_ID !== 'undefined' ? SCHED_INPUT_CHANNEL_ID : '');
+      if (skipChannelId && msg.id && typeof buildDiscordMessageLink === 'function') {
+        var skipLink = buildDiscordMessageLink(skipChannelId, msg.id);
+        if (skipLink) skipMessageLink = ` • [Jump to message](${skipLink})`;
+      }
+      sendLog(`⚠️ Skipped message ID: ${msg?.id} — unable to parse${skipMessageLink}`);
       return { updated: 0 };
     }
 
@@ -1101,7 +1124,38 @@ function processOneDiscordMessage(msg, startTime, options) {
             // }
             if (link) messageLink = ` • [Jump to message](${link})`;
           }
-          sendLog(`✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`);
+
+          // Build schedule confirmation message
+          var combinedMessage = '';
+
+          if (updateResult.notice) {
+            // Extract season info and KTP emoji from notice for streamlined format
+            // Notice format: ":white_check_mark: KTP Season 8 dod_railyard_b6 Weekly Boards Posted/Edited. Nov 9, 8:48 PM EST :KTP:"
+            // Extract season info (text before "Weekly Boards") and KTP emoji (at the end)
+            var seasonInfo = '';
+            var ktpEmoji = '';
+
+            var noticeMatch = updateResult.notice.match(/^:white_check_mark:\s+(.+?)\s+Weekly Boards/);
+            if (noticeMatch) {
+              // Extract season info, but remove the map name if present (already shown in schedule)
+              var parts = noticeMatch[1].trim().split(/\s+/);
+              // Keep "KTP Season 8" but remove map name (contains underscores or starts with dod_, etc)
+              seasonInfo = parts.filter(function(p) { return p.indexOf('_') === -1; }).join(' ');
+            }
+
+            var emojiMatch = updateResult.notice.match(/(<:[^>]+>)\s*$/);
+            if (emojiMatch) {
+              ktpEmoji = ' ' + emojiMatch[1];
+            }
+
+            // Build streamlined combined message
+            combinedMessage = `:white_check_mark: ${seasonInfo}${ktpEmoji} ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`;
+          } else {
+            // No weekly notice - just schedule confirmation
+            combinedMessage = `✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`;
+          }
+
+          sendLog(combinedMessage);
         }
 
         // Note: Skip logging is handled verbosely in 70_updates.gs (shows team names)
@@ -1172,6 +1226,11 @@ function parseScheduleMessage_v3(text, messageDate) {
     // Try to match teams with hint first
     var matchA = matchTeam(sides.a, hintDiv);
     var matchB = matchTeam(sides.b, hintDiv);
+
+    // Debug logging for team matching
+    if (typeof logToSheet === 'function') {
+      logToSheet(`🔍 Team matching: sides.a="${sides.a}" → matchA=${matchA ? matchA.name : 'null'}, sides.b="${sides.b}" → matchB=${matchB ? matchB.name : 'null'}`);
+    }
 
     // If not found with hint, try without hint (hint might be wrong)
     if ((!matchA || !matchB) && hintDiv) {

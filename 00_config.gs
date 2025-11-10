@@ -20,10 +20,49 @@
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.7.4
- * Last Updated: 2025-11-08
+ * Version: 3.8.2
+ * Last Updated: 2025-11-09
  *
  * CHANGELOG:
+ * v3.8.2 (2025-11-09) - BUGFIX: Enhanced possessive handling for curly apostrophes and spacing
+ *                     - Handle both ASCII (') and curly (') apostrophes in possessives
+ *                     - Handle spaced possessives: "Wicked ' s" → "Wickeds"
+ *                     - Fixes "The Wicked's" with curly quotes or extra spacing
+ * v3.8.1 (2025-11-09) - BUGFIX: Exclude template teams from fuzzy matching
+ *                     - Added filter to skip template teams (BRONZE A, BRONZE B, ..., BRONZE N, etc.)
+ *                     - Prevents "NoGo" from matching to "BRONZE N" template team
+ *                     - Template teams are placeholders before season starts and should never match schedules
+ *                     - Added debug logging to show team matching results
+ * v3.8.0 (2025-11-09) - BUGFIX: Handle slash separators in schedule messages
+ *                     - Added logic to strip " / " separated metadata from team names
+ *                     - Fixes "clanX vs GVMH / week 4 armory / 3pm est" parsing
+ *                     - Preserves dates like "10/12" by only matching slashes with surrounding spaces
+ * v3.7.9 (2025-11-09) - ENHANCEMENT: Consolidated weekly board creation/edit logs
+ *                     - Combined multiple granular logs into single consolidated message
+ *                     - Example: "Week 2025-10-12|dod_armory_b6: header (ID: 123), table (ID: 456)"
+ *                     - Moved to WM_Log only (not Discord) for cleaner output
+ *                     - Reduces Discord spam from 3-4 messages to 0 (kept in sheets for debugging)
+ * v3.7.8 (2025-11-09) - BUGFIX: Enhanced date/time stripping in team name extraction
+ *                     - Added day-of-week abbreviations (sun, mon, tue, etc.) to splitVsSides stripping
+ *                     - Added month + day pattern stripping (e.g., "October 5th")
+ *                     - Fixes "vs The Wicked's Sunday October 5th at 10pm EDT" parsing
+ *                     - Prevents date/time text from being included in team name matching
+ * v3.7.7 (2025-11-09) - BUGFIX: Enhanced map hint stripping with common DoD map names
+ *                     - Added fallback pattern for common maps: "Railyard", "Railroad", "Anjou", etc.
+ *                     - Fixes "Railyard Soul vs Thunder" where "Railyard" is map hint before team name
+ *                     - Helps when map not in catalog yet or captain uses shorthand map names
+ * v3.7.6 (2025-11-09) - BUGFIX: Handle possessive apostrophes in team names
+ *                     - normalizeTeamText() now converts 's to s before normalization
+ *                     - Fixes "The Wicked's" → "The Wickeds" matching
+ *                     - Prevents parse failures when captains use possessive forms
+ * v3.7.5 (2025-11-09) - ENHANCEMENT: Improved Discord logging and message organization
+ *                     - Added Discord message links to skipped message warnings for easier troubleshooting
+ *                     - Moved verbose rendering logs to WM_Log sheet only (not Discord)
+ *                     - Messages moved: "📋 Rendering week", "📊 Generated weekly tables body", "⏭️ Skipping rematches", "⏭️ Table unchanged"
+ *                     - Combined and streamlined "Weekly Boards Posted/Edited" and schedule confirmation messages
+ *                     - Format: ":white_check_mark: KTP Season 8 :KTP: Gold • map • teams • time • Scheduled by @user • Jump to message"
+ *                     - Removes redundant map names, timestamps, and action words for cleaner Discord output
+ *                     - Reduces Discord log spam while maintaining full debug info in sheets
  * v3.7.4 (2025-11-08) - BUGFIX: Added support for animated Discord emojis
  *                     - Updated emoji regex from <:name:id> to <a?:name:id> (supports both static and animated)
  *                     - Fixes parse failures with animated emojis like <a:Team_Emo:123>
@@ -172,8 +211,8 @@
  *                     - Automatic weekly board posting
  */
 
-const VERSION = '3.7.4';
-const VERSION_DATE = '2025-11-08';
+const VERSION = '3.8.2';
+const VERSION_DATE = '2025-11-09';
 
 // ---- DEBUG SETTINGS ----
 var DEBUG_PARSER = false;  // Toggle verbose parser logging (🔍, 🗺️, 📈 messages)

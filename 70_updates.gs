@@ -231,14 +231,26 @@ function updateTablesMessageFromPairs(weekKey, pairs, options) {
 
   // --- 4) Save the store and re-render/update Discord (edit in place)
   if (typeof saveWeekStore === 'function') saveWeekStore(weekKey, store);
+  var upsertResult = null;
+  var weeklyNotice = '';
   try {
     if (typeof upsertWeeklyDiscordMessage === 'function') {
-      upsertWeeklyDiscordMessage(wkMeta); // this will read the same store by weekKey
+      // Suppress the notice in upsertWeeklyDiscordMessage - we'll combine it with schedule confirmation
+      upsertResult = upsertWeeklyDiscordMessage(wkMeta, { suppressNotice: true });
+      weeklyNotice = (upsertResult && upsertResult.notice) || '';
     }
   } catch (e) {
     // keep going but include error hint in payload
     store._upsertError = String(e && e.message || e);
   }
 
-  return { ok: true, weekKey: weekKey, updated: updated, skipped: skipped, unmatched: unmatched, store: store };
+  return {
+    ok: true,
+    weekKey: weekKey,
+    updated: updated,
+    skipped: skipped,
+    unmatched: unmatched,
+    store: store,
+    notice: weeklyNotice  // Include notice for combining with schedule confirmation
+  };
 }

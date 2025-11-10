@@ -29,9 +29,11 @@ var _renderedWeeksThisExecution = _renderedWeeksThisExecution || {};
  * MAIN: Upsert header + weekly tables (1 msg) + rematches (N msgs if needed).
  * Creates or updates Discord messages for weekly matches board.
  * @param {Object} week - Week object {date, mapRef, blocks, weekKey}
- * @returns {Object} {ok, weekKey, channelId, headerId, tableId, rematchIds, action, messageIds}
+ * @param {Object} [options] - Options {suppressNotice: boolean}
+ * @returns {Object} {ok, weekKey, channelId, headerId, tableId, rematchIds, action, messageIds, notice}
  */
-function upsertWeeklyDiscordMessage(week) {
+function upsertWeeklyDiscordMessage(week, options) {
+  options = options || {};
   // Normalize week
   week = week || {};
   if (!week.date && typeof getAlignedUpcomingWeekOrReport === 'function') {
@@ -64,9 +66,9 @@ function upsertWeeklyDiscordMessage(week) {
   if (isFirstRenderThisExecution) {
     _renderedWeeksThisExecution[wkKey] = true;
 
-    if (typeof sendLog === 'function' && header && header.embeds && header.embeds.length > 0) {
+    if (typeof logToSheet === 'function' && header && header.embeds && header.embeds.length > 0) {
       var headerTitle = (header.embeds[0] && header.embeds[0].title) ? header.embeds[0].title : 'No title';
-      sendLog(`📋 Rendering week ${wkKey} with header: "${headerTitle}"`);
+      logToSheet(`📋 Rendering week ${wkKey} with header: "${headerTitle}"`);
     }
   }
 
@@ -90,11 +92,11 @@ function upsertWeeklyDiscordMessage(week) {
   }
 
   // Diagnostic: check if weeklyBody was generated (once per week)
-  if (isFirstRenderThisExecution && typeof sendLog === 'function') {
+  if (isFirstRenderThisExecution && typeof logToSheet === 'function') {
     if (weeklyBody && weeklyBody.length > 0) {
-      sendLog(`📊 Generated weekly tables body (${weeklyBody.length} chars) for week ${wkKey}`);
+      logToSheet(`📊 Generated weekly tables body (${weeklyBody.length} chars) for week ${wkKey}`);
     } else {
-      sendLog(`⚠️ No weekly tables body generated for week ${wkKey}`);
+      logToSheet(`⚠️ No weekly tables body generated for week ${wkKey}`);
     }
   }
 
@@ -117,8 +119,8 @@ function upsertWeeklyDiscordMessage(week) {
   if (isCurrentWeek && typeof renderRematchesTableBody === 'function') {
     remBody = String(renderRematchesTableBody(week, store) || '');
     remBody = stripFence(remBody.trim());
-  } else if (!isCurrentWeek && isFirstRenderThisExecution && typeof sendLog === 'function') {
-    sendLog(`⏭️ Skipping rematches for historical week ${wkKey} (only shown on current week)`);
+  } else if (!isCurrentWeek && isFirstRenderThisExecution && typeof logToSheet === 'function') {
+    logToSheet(`⏭️ Skipping rematches for historical week ${wkKey} (only shown on current week)`);
   }
 
   var ids = loadMsgIds(wkKey);  // expects {header, table, rematch, tables[], rematches[]}
@@ -139,70 +141,64 @@ function upsertWeeklyDiscordMessage(week) {
   var prevRemHash = prevRem.rematch || '';
 
   var actionHeader = 'noop', actionWeekly = 'noop', actionRem = 'noop';
+  var creationLogs = []; // Collect creation logs to consolidate into single message
 
   // 1) Header
   try {
     if (!ids.header) {
       ids.header = postChannelMessageAdvanced(channelId, '', header.embeds);
       actionHeader = ids.header ? 'created' : 'noop';
-      if (isFirstRenderThisExecution && typeof sendLog === 'function' && ids.header) {
-        sendLog(`📝 Created header embed for week ${wkKey} (ID: ${ids.header})`);
+      if (ids.header) {
+        creationLogs.push(`header (ID: ${ids.header})`);
       }
     } else if (prevHeaderHash !== headerHash) {
       editChannelMessageAdvanced(channelId, ids.header, '', header.embeds);
       actionHeader = 'edited';
-      if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-        sendLog(`✏️ Edited header embed for week ${wkKey} (ID: ${ids.header})`);
-      }
+      creationLogs.push(`header edited (ID: ${ids.header})`);
     }
   } catch (e) {
     // create once if edit path failed (bad id)
-    if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-      sendLog(`⚠️ Header edit failed for ${wkKey}, creating new: ${e.message}`);
+    if (isFirstRenderThisExecution && typeof logToSheet === 'function') {
+      logToSheet(`⚠️ Header edit failed for ${wkKey}, creating new: ${e.message}`);
     }
     ids.header = postChannelMessageAdvanced(channelId, '', header.embeds);
     actionHeader = ids.header ? 'created' : 'noop';
+    if (ids.header) {
+      creationLogs.push(`header (recovery) (ID: ${ids.header})`);
+    }
   }
 
   // 2) Weekly tables (single message)
   if (weeklyBody) {
     try {
       if (!ids.table) {
-        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-          sendLog(`📝 Creating new table message for week ${wkKey}...`);
-        }
         ids.table = postChannelMessage(channelId, weeklyBody);
         actionWeekly = ids.table ? 'created' : 'noop';
-        if (isFirstRenderThisExecution && typeof sendLog === 'function' && ids.table) {
-          sendLog(`✅ Created table message for week ${wkKey} (ID: ${ids.table})`);
+        if (ids.table) {
+          creationLogs.push(`table (ID: ${ids.table})`);
         }
       } else if (prevWeeklyHash !== weeklyHash) {
-        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-          sendLog(`✏️ Editing existing table message ${ids.table} for week ${wkKey}...`);
-        }
         editChannelMessage(channelId, ids.table, weeklyBody);
         actionWeekly = 'edited';
-        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-          sendLog(`✅ Edited table message for week ${wkKey}`);
-        }
+        creationLogs.push(`table edited (ID: ${ids.table})`);
       } else {
-        if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-          sendLog(`⏭️ Table unchanged for week ${wkKey}, skipping update`);
+        if (isFirstRenderThisExecution && typeof logToSheet === 'function') {
+          logToSheet(`⏭️ Table unchanged for week ${wkKey}, skipping update`);
         }
       }
     } catch (e) {
-      if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-        sendLog(`⚠️ Table operation failed for ${wkKey}, creating new: ${e.message}`);
+      if (isFirstRenderThisExecution && typeof logToSheet === 'function') {
+        logToSheet(`⚠️ Table operation failed for ${wkKey}, creating new: ${e.message}`);
       }
       ids.table = postChannelMessage(channelId, weeklyBody);
       actionWeekly = ids.table ? 'created' : 'noop';
-      if (isFirstRenderThisExecution && typeof sendLog === 'function' && ids.table) {
-        sendLog(`✅ Created replacement table message (ID: ${ids.table})`);
+      if (ids.table) {
+        creationLogs.push(`table (recovery) (ID: ${ids.table})`);
       }
     }
   } else {
-    if (isFirstRenderThisExecution && typeof sendLog === 'function') {
-      sendLog(`⏭️ No weekly body to post for week ${wkKey}`);
+    if (isFirstRenderThisExecution && typeof logToSheet === 'function') {
+      logToSheet(`⏭️ No weekly body to post for week ${wkKey}`);
     }
   }
   // 3) Rematches — create if missing, else edit if changed, or delete if now gone
@@ -236,6 +232,11 @@ function upsertWeeklyDiscordMessage(week) {
     }
   }
 
+
+  // Send consolidated creation log (if any actions occurred)
+  if (isFirstRenderThisExecution && creationLogs.length > 0 && typeof logToSheet === 'function') {
+    logToSheet(`📝 Week ${wkKey}: ${creationLogs.join(', ')}`);
+  }
 
   // Persist IDs + hashes
   ids.header = ids.header ? [ids.header] : [];
@@ -277,9 +278,11 @@ function upsertWeeklyDiscordMessage(week) {
     return 'Posted/Edited'; // conservative default
   })();
 
-  // Build and send the notice
+  // Build and send the notice (unless suppressed)
   var notice = formatWeeklyNotice(week, actionWord);
-  try { sendLog(notice); } catch (_) { }
+  if (!options.suppressNotice) {
+    try { sendLog(notice); } catch (_) { }
+  }
 
   try {
     logLocal('INFO', 'weekly.board.notice', {
@@ -300,7 +303,8 @@ function upsertWeeklyDiscordMessage(week) {
     tableId: ids.table || '',
     rematchIds: ids.rematches || [],
     action: (created.length ? 'created' : (edited.length ? 'edited' : 'no_change')),
-    messageIds: [ids.header, ids.table].concat(ids.rematches || []).filter(Boolean)
+    messageIds: [ids.header, ids.table].concat(ids.rematches || []).filter(Boolean),
+    notice: notice  // Include the notice in return value for combining with schedule confirmations
   };
 }
 
