@@ -20,10 +20,44 @@
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.6.3
- * Last Updated: 2025-11-06
+ * Version: 3.7.4
+ * Last Updated: 2025-11-08
  *
  * CHANGELOG:
+ * v3.7.4 (2025-11-08) - BUGFIX: Added support for animated Discord emojis
+ *                     - Updated emoji regex from <:name:id> to <a?:name:id> (supports both static and animated)
+ *                     - Fixes parse failures with animated emojis like <a:Team_Emo:123>
+ *                     - Also updated versus emoji to support animated version <a:versus:123>
+ * v3.7.3 (2025-11-08) - BUGFIX: Fixed "Continue from Last" button to not reprocess last message
+ *                     - Added inclusive parameter to server_startPollingFrom() (defaults to true)
+ *                     - "Continue from Last" now passes inclusive=false (exclusive, start after last)
+ *                     - "Parse from Specific ID" passes inclusive=true (inclusive, includes specified message)
+ *                     - Prevents duplicate processing when continuing historical parsing
+ * v3.7.2 (2025-11-08) - ENHANCEMENT: Improved emoji parsing for edge cases
+ *                     - Added support for special characters in custom emoji names (~, -, !, .)
+ *                     - Handles Discord auto-renamed emojis like <:Team_Dice~1:123>
+ *                     - Custom :versus: emoji now recognized as delimiter: <:versus:123> → " vs "
+ *                     - Always log raw messages (not just DEBUG mode) to aid parse failure debugging
+ * v3.7.1 (2025-11-08) - BUGFIX: Multi-word team matching when emoji + text both present
+ *                     - Fixed matchTeam() to try resolving each word individually
+ *                     - Handles "<:Team_Thunder:123> THUNDER" → resolves "Team_Thunder" from alias
+ *                     - Prevents wrong division detection when captain uses emoji + text name
+ *                     - Example: "<:Team_Thunder:...> THUNDER vs ICYHOT" now correctly matches Gold teams
+ * v3.7.0 (2025-11-08) - PERFORMANCE: Batch-level caching for massive speed improvement
+ *                     - buildWeekListFromSheets() now caches result for entire batch (~180 sheet reads saved per message!)
+ *                     - Team alias and team index caches now persist across messages in same batch
+ *                     - Removed cache clearing in resolveTeamAlias() and parseScheduleMessage_v3()
+ *                     - Increased POLL_MAX_MESSAGES_PER_RUN from 5 to 10 (safe with caching)
+ *                     - Reduced verbose logging: raw message and parsed result logs now DEBUG_PARSER only
+ *                     - Expected performance: 10-15+ messages/batch instead of 3-4 (3-4x improvement!)
+ *                     - Cache safety: Only caches static match structure (teams, maps, dates), not schedules/scores
+ *                     - Scheduling matches updates column E + store but doesn't invalidate cache (by design)
+ *                     - FEATURE: Full emoji support for team names and delimiters
+ *                     - Custom Discord emojis: <:emo:123> → "emo" (use emoji name in _Aliases sheet)
+ *                     - :versus: and 🆚 emoji now recognized as valid delimiters (converted to "vs")
+ *                     - :flag_ch: style emoji shortcodes converted to Unicode flags (🇨🇭, etc.)
+ *                     - Captains can use emojis exclusively: "<:emo:123> vs <:clanx:456> 9pm" works!
+ *                     - Examples: "<:CHI:123> vs emo 9pm", "🇨🇭 vs emo 9pm", ":flag_ch: vs emo 9pm"
  * v3.6.3 (2025-11-06) - BUGFIX: Parser now strips filler words before times
  *                     - Added "default", "usual", "normal", "regular", "standard", "typical" to strip list
  *                     - Fixes "emo // clanx default 9pm" being parsed as team "clanx default"
@@ -138,8 +172,8 @@
  *                     - Automatic weekly board posting
  */
 
-const VERSION = '3.6.3';
-const VERSION_DATE = '2025-11-06';
+const VERSION = '3.7.4';
+const VERSION_DATE = '2025-11-08';
 
 // ---- DEBUG SETTINGS ----
 var DEBUG_PARSER = false;  // Toggle verbose parser logging (🔍, 🗺️, 📈 messages)
@@ -197,7 +231,7 @@ const TWITCH_MAP_KEY = 'TWITCH_USER_MAP_JSON';
 const GLOBAL_SCHED_KEY = 'WEEKLY_GLOBAL_SCHEDULES';
 
 // ---- PERFORMANCE / BEHAVIOR ----
-const POLL_MAX_MESSAGES_PER_RUN = 5;
+const POLL_MAX_MESSAGES_PER_RUN = 10;  // Increased from 5 due to batch caching improvements
 const POLL_SOFT_DEADLINE_MS = 4.5 * 60 * 1000; // ~4.5 minutes
 const LOOKUP_CACHE_TTL_SEC = 6 * 60 * 60;     // 6 hours
 

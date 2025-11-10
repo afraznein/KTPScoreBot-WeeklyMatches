@@ -23,6 +23,17 @@
 // =======================
 // Note: DEBUG_PARSER flag is now in 00_config.gs
 
+// ---- BATCH-LEVEL PERFORMANCE CACHES ----
+// These caches persist for the entire batch run (multiple messages)
+// Cleared at the start of each batch to ensure fresh data
+var BATCH_WEEK_LIST_CACHE = null;      // Caches buildWeekListFromSheets() result (~180 sheet reads saved per message!)
+// Note: Team caches (TEAM_ALIAS_CACHE, TEAM_INDEX_CACHE) are defined in 05_util.gs
+//
+// CACHE SAFETY: The week list cache stores ONLY static match structure (teams, maps, dates, row numbers).
+// It does NOT cache scheduled times, scores, or W/L status - those come from column E and the store.
+// Therefore, the cache remains valid when you schedule matches (only column E + store are updated).
+// Cache should only be cleared when: 1) Starting new batch, 2) Adding new weeks/playoffs to sheets
+
 /**
  * Build alias→canon map from the General sheet list. Cached per execution.
  * @returns {Object} Map of aliases to canonical map names
@@ -170,11 +181,39 @@ function teamSynonyms() {
 function stripDiscordNoise(s) {
   var t = String(s || '');
 
+  // Convert versus-related emojis to standard " vs " delimiter before stripping other emojis
+  t = t.replace(/<a?:versus:\d+>/gi, ' vs ')   // <:versus:123> or <a:versus:123> (static or animated)
+    .replace(/:versus:/gi, ' vs ')             // :versus: shortcode (text)
+    .replace(/\ud83c\udd9a/g, ' vs ')          // 🆚 VS Button emoji (Unicode)
+    .replace(/⚔️/g, ' vs ')                    // Crossed swords emoji (alternative)
+    .replace(/\u2694\ufe0f/g, ' vs ');        // Crossed swords (variant)
+
+  // Convert common flag emoji shortcodes to Unicode (for team identification)
+  // Captains often use flag emojis as team shortcuts - preserve them as Unicode
+  t = t.replace(/:flag_([a-z]{2}):/gi, function(match, code) {
+    // Convert country code to regional indicator symbols (flag emoji)
+    // e.g., :flag_ch: → 🇨🇭 (CH), :flag_us: → 🇺🇸 (US)
+    var upper = code.toUpperCase();
+    var regionalA = String.fromCodePoint(0x1F1E6 + upper.charCodeAt(0) - 65);
+    var regionalB = String.fromCodePoint(0x1F1E6 + upper.charCodeAt(1) - 65);
+    return regionalA + regionalB;
+  });
+
+  // Convert custom Discord emojis to just the name (for team identification via aliases)
+  // e.g., <:emo:123> → emo, <a:Team_Emo:456> → Team_Emo (static or animated)
+  // Handles both static (<:name:id>) and animated (<a:name:id>) Discord emojis
+  // Teams can then be identified by emoji name in _Aliases sheet
+  // Supports special characters: letters, numbers, _, -, ~, !, etc.
+  t = t.replace(/<a?:([a-z0-9_\-~!.]+):\d+>/gi, function(match, name) {
+    return ' ' + name + ' ';
+  });
+
   // remove mentions <@123>, <@!123>, <@&role>, <#channel>
   t = t.replace(/<[@#][!&]?\d+>/g, ' ');
-  // remove :emoji: and <:emoji:123456> and @name with flags
-  t = t.replace(/<:[a-z0-9_]+:\d+>/gi, ' ')
-    .replace(/:[a-z0-9_]+:/gi, ' ');
+
+  // remove OTHER emoji shortcodes :emoji: (but versus, flags, and custom Discord emojis were already handled above)
+  t = t.replace(/:[a-z0-9_]+:/gi, ' ');
+
   // collapse multiple spaces
   t = t.replace(/\s+/g, ' ').trim();
   return t;
@@ -259,8 +298,7 @@ function cleanScheduleText(raw) {
  * @returns {string} Canonical team name or original input if no alias found
  */
 function resolveTeamAlias(rawInput) {
-  TEAM_ALIAS_CACHE = null; // Always force reload from sheet
-  TEAM_INDEX_CACHE = null; // Clear team index cache too
+  // Don't clear caches - let them persist across messages in the same batch for performance
   const aliasMap = loadTeamAliases();
   const upper = String(rawInput || '').trim().toUpperCase();
   return aliasMap[upper] || rawInput;
@@ -276,11 +314,28 @@ function matchTeam(snippet, forcedDivision) {
   var idx = (typeof getTeamIndexCached === 'function') ? getTeamIndexCached() : null;
   if (!idx || !idx.teams || !idx.teams.length) return null;
 
-
   var syn = teamSynonyms();
+
+  // Try resolving the full snippet first
   var resolved = resolveTeamAlias(snippet);
   var s = normalizeTeamText(resolved);
   if (syn[s]) s = normalizeTeamText(syn[s]);
+
+  // If full snippet didn't resolve to an alias, try each word individually
+  // This handles cases like "Team_Thunder THUNDER" where captain uses emoji + text
+  if (resolved === snippet && snippet.indexOf(' ') > -1) {
+    var words = snippet.split(/\s+/);
+    for (var w = 0; w < words.length; w++) {
+      var wordResolved = resolveTeamAlias(words[w]);
+      if (wordResolved !== words[w]) {
+        // Found an alias match for this word
+        resolved = wordResolved;
+        s = normalizeTeamText(resolved);
+        if (syn[s]) s = normalizeTeamText(syn[s]);
+        break;
+      }
+    }
+  }
 
 
   var best = null, bestScore = -1;
@@ -445,9 +500,16 @@ function parseWhenFlexible(s, hintDiv, hintMap, referenceDate) {
 /**
  * Build a list of all weeks from all division sheets.
  * Includes matches array for each week to enable matchup searching.
+ * Uses batch-level cache to avoid redundant sheet reads (major performance improvement).
+ * @param {boolean} forceRefresh - Force cache refresh (optional, defaults to false)
  * @returns {Array} Array of week objects {division, map, date, defaultDate, top, matches: [{home, away}]}
  */
-function buildWeekListFromSheets() {
+function buildWeekListFromSheets(forceRefresh) {
+  // Check batch cache first (huge performance gain - avoids ~180 sheet reads per message)
+  if (!forceRefresh && BATCH_WEEK_LIST_CACHE) {
+    return BATCH_WEEK_LIST_CACHE;
+  }
+
   var weeks = [];
   var divs = (typeof getDivisionSheets === 'function') ? getDivisionSheets() : ['Bronze', 'Silver', 'Gold'];
   var G = gridMeta();
@@ -511,6 +573,8 @@ function buildWeekListFromSheets() {
     }
   }
 
+  // Cache the result for subsequent messages in this batch
+  BATCH_WEEK_LIST_CACHE = weeks;
   return weeks;
 }
 
@@ -794,6 +858,14 @@ function pollAndProcessFromId(channelId, startId, opt) {
   // Pass channelId through options for message link building
   opt.channelId = channelId;
 
+  // Clear batch-level caches at start of batch for fresh data
+  // This dramatically improves performance by avoiding ~180 sheet reads per message
+  BATCH_WEEK_LIST_CACHE = null;
+
+  // Clear team data caches (defined in 05_util.gs) to ensure fresh data per batch
+  if (typeof TEAM_ALIAS_CACHE !== 'undefined') TEAM_ALIAS_CACHE = null;
+  if (typeof TEAM_INDEX_CACHE !== 'undefined') TEAM_INDEX_CACHE = null;
+
   // 0) If inclusive: try to fetch/process the start message itself
   if (inclusive && startId) {
     try {
@@ -965,9 +1037,9 @@ function processOneDiscordMessage(msg, startTime, options) {
   try {
     raw = msg.content;
 
-    // Log raw message to sheet only (verbose)
+    // Log raw message to sheet (always log for parse failures to aid debugging)
     if (typeof logToSheet === 'function') {
-      logToSheet(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 100)}..."`);
+      logToSheet(`👀 Message ID ${msg.id}: raw="${raw.slice(0, 150)}..."`);
     }
 
     // Extract timestamp from Discord message (if available)
@@ -990,8 +1062,8 @@ function processOneDiscordMessage(msg, startTime, options) {
 
     parsed = parseScheduleMessage_v3(raw, messageDate);
 
-    // Log parsed result to sheet only (not Discord - too verbose)
-    if (typeof logToSheet === 'function') {
+    // Log parsed result to sheet only (verbose - DEBUG mode only)
+    if (DEBUG_PARSER && typeof logToSheet === 'function') {
       logToSheet(`🧪 Parsed: ${JSON.stringify(parsed)}`);
     }
 
@@ -1070,8 +1142,8 @@ function processOneDiscordMessage(msg, startTime, options) {
  */
 function parseScheduleMessage_v3(text, messageDate) {
   var trace = [];
-  TEAM_ALIAS_CACHE = null;
-  TEAM_INDEX_CACHE = null; // Clear team index cache too
+  // Don't clear caches here - let them persist across messages in the same batch
+  // (caches in 05_util.gs will naturally persist until explicitly cleared)
   try {
     var raw = String(text || '');
     raw = cleanScheduleText(raw);
@@ -1109,9 +1181,7 @@ function parseScheduleMessage_v3(text, messageDate) {
         // Found teams without hint - hint was probably wrong
         matchA = matchA2;
         matchB = matchB2;
-        if (typeof sendLog === 'function') {
-          sendLog(`⚠️ Teams not found in "${hintDiv}" division, but found in "${matchA.division}" - captain may have wrong division hint`);
-        }
+        // Note: More detailed warning logged later at line 1205 with team names
       }
     }
 

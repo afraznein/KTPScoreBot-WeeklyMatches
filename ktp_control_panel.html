@@ -599,7 +599,7 @@
       }
       if (!/^\d{5,30}$/.test(id)) { out('❌ Invalid message ID format','err'); return; }
       setBusy(true, 'Parsing historical messages…');
-      out('▶ Parse Historical Messages from ' + id + ' (skipScheduled=' + skip + ')…');
+      out('▶ Parse Historical Messages from ' + id + ' (inclusive, skipScheduled=' + skip + ')…');
       google.script.run.withSuccessHandler(res => {
         if (res.ok) {
           const d = res.data;
@@ -617,7 +617,7 @@
         }
         setBusy(false);
       }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
-      .server_startPollingFrom(secret, id, skip);
+      .server_startPollingFrom(secret, id, skip, true);  // inclusive=true: include the specified message
     };
 
     // Continue Historical Parsing from last pointer
@@ -635,7 +635,7 @@
         }
 
         const lastId = stateRes.data.lastStartId;
-        out('▶ Continue Historical Parsing from ' + lastId + ' (skipScheduled=' + skip + ')…');
+        out('▶ Continue Historical Parsing after ' + lastId + ' (exclusive, skipScheduled=' + skip + ')…');
 
         google.script.run.withSuccessHandler(res => {
           if (res.ok) {
@@ -653,7 +653,7 @@
           }
           setBusy(false);
         }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-        .server_startPollingFrom(secret, lastId, skip);
+        .server_startPollingFrom(secret, lastId, skip, false);  // inclusive=false: don't reprocess last message
 
       }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
       .server_getState();
