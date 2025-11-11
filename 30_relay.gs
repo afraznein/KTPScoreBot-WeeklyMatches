@@ -18,8 +18,10 @@
 //   postChannelMessage, postChannelMessageAdvanced
 // Message editing/deleting:
 //   editChannelMessage, editChannelMessageAdvanced, deleteMessage
+// Direct messages & reactions:
+//   sendDM, addReaction, getReactions
 //
-// Total: 19 functions
+// Total: 22 functions
 // =======================
 
 // ---------- RELAY HTTP CORE ----------
@@ -426,6 +428,96 @@ function deleteMessage(channelId, messageId) {
   var p = getRelayPaths();
   var base = p.del || '/delete';
   var path = base + '/' + encodeURIComponent(channelId) + '/' + encodeURIComponent(messageId);
-  var res = relayFetch(path, { method: 'delete' }) || {};
+  var res = relayFetch(path, { method: 'delete'}) || {};
   return !(res && res.ok === false);
+}
+
+/* ----------------------- Direct Messages ----------------------- */
+
+/**
+ * Send a DM to a Discord user and log it to WM_Log sheet.
+ * @param {string} userId - Discord user ID
+ * @param {string} content - Message content
+ * @param {Object} options - Optional {logToSheet: boolean (default true)}
+ * @returns {Object} {ok: boolean, id: string} Response from relay
+ */
+function sendDM(userId, content, options) {
+  options = options || {};
+  var logToWMLog = (typeof options.logToSheet !== 'undefined') ? options.logToSheet : true;
+
+  var p = getRelayPaths();
+  var path = p.dm || '/dm';
+  var payload = {
+    userId: String(userId),
+    content: String(content || '').slice(0, 1900)
+  };
+
+  var res = relayFetch(path, { method: 'post', payload: payload }) || {};
+
+  // Store DM channel ID for later reply checking (if relay returns it)
+  if (res && res.channelId) {
+    try {
+      var sp = PropertiesService.getScriptProperties();
+      var key = 'DM_CHANNEL_ID::' + String(userId);
+      sp.setProperty(key, String(res.channelId));
+    } catch (e) {
+      // Ignore storage errors
+    }
+  }
+
+  // Log the DM to WM_Log sheet for record-keeping
+  if (logToWMLog && typeof logMatchToSheet === 'function') {
+    try {
+      logMatchToSheet('', '', '', '', content.slice(0, 100), 'DM_SENT', '', `<@${userId}>`, 'DM');
+    } catch (e) {
+      // Ignore logging errors
+    }
+  }
+
+  return {
+    ok: (res && res.ok !== false),
+    id: (res && res.id) ? String(res.id) : '',
+    channelId: (res && res.channelId) ? String(res.channelId) : ''
+  };
+}
+
+/**
+ * Add a reaction emoji to a message.
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID
+ * @param {string} emoji - Emoji (unicode or "name:id")
+ * @returns {boolean} True if reaction added successfully
+ */
+function addReaction(channelId, messageId, emoji) {
+  var p = getRelayPaths();
+  var path = p.react || '/react';
+  var payload = {
+    channelId: String(channelId),
+    messageId: String(messageId),
+    emoji: String(emoji)
+  };
+
+  var res = relayFetch(path, { method: 'post', payload: payload }) || {};
+  return !(res && res.ok === false);
+}
+
+/**
+ * Get users who reacted to a message with a specific emoji.
+ * @param {string} channelId - Discord channel ID
+ * @param {string} messageId - Discord message ID
+ * @param {string} emoji - Emoji (unicode or "name:id")
+ * @returns {Array} Array of user objects {id, username, displayName, roles[]}
+ */
+function getReactions(channelId, messageId, emoji) {
+  var p = getRelayPaths();
+  var path = p.reactions || '/reactions';
+  var url = path + '?channelId=' + encodeURIComponent(channelId) +
+            '&messageId=' + encodeURIComponent(messageId) +
+            '&emoji=' + encodeURIComponent(emoji);
+
+  var res = relayFetch(url, { method: 'get' });
+
+  if (Array.isArray(res)) return res;
+  if (res && res.data && Array.isArray(res.data)) return res.data;
+  return [];
 }

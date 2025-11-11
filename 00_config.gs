@@ -17,13 +17,126 @@
 //
 // =======================
 
+const VERSION = '3.11.0';
+const VERSION_DATE = '2025-11-11';
+
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.8.2
- * Last Updated: 2025-11-09
+ * Version: 3.11.0
+ * Last Updated: 2025-11-11
  *
  * CHANGELOG:
+ * v3.11.0 (2025-11-11) - FEATURE: Smart Alias Suggestions via DM
+ *                      - NEW: Auto-detect failed team matches and send DM suggestions to captains
+ *                      - NEW: analyzeTeamsForAliases() reads Teams sheet (rows 2/16/30) and generates comprehensive alias list
+ *                      - NEW: logMissingAliases() reports which aliases are missing from _Aliases sheet
+ *                      - NEW: suggestTeamAlias() performs fuzzy matching to suggest correct team
+ *                      - NEW: sendAliasSuggestionDM() sends interactive DM with "yes/no/correction" prompts
+ *                      - NEW: sendDM(), addReaction(), getReactions() relay functions (30_relay.gs)
+ *                      - NEW: Pending suggestions stored in Script Properties for later confirmation
+ *                      - NEW: addAliasToSheet() auto-adds confirmed aliases to _Aliases sheet
+ *                      - NEW: DM logging to WM_Log sheet for audit trail
+ *                      - NEW MODULE: 12_alias_suggestions.gs (6 functions)
+ *                      - UPDATED: 30_relay.gs (+3 functions), 05_util.gs (+3 functions), 60_parser.gs (DM integration)
+ *                      - Example: "soul skaters" not found → DM: "Did you mean SOUL SKATERS (Gold)?"
+ *                      - Captain replies "yes" → Auto-adds alias → Future matches succeed
+ * v3.10.0 (2025-11-11) - BEHAVIOR CHANGE: Always create confirmations for re-processed matches
+ *                      - Removed re-schedule detection from confirmation logic
+ *                      - When "Skip Already Scheduled" is UNCHECKED: Shows all processed matches
+ *                      - When "Skip Already Scheduled" is CHECKED: Only shows truly new matches
+ *                      - Enables full testing/development workflow with complete visibility
+ *                      - Re-processing now shows: "✅ Parsed 9 matches" + 9 confirmations
+ *                      - Production mode with checkbox: "✅ Parsed 2 matches" + 2 confirmations
+ *                      - Removed rescheduleCount tracking entirely (no longer needed)
+ * v3.9.9 (2025-11-11) - CRITICAL FIX: rescheduleCount now batch-local, not persistent
+ *                     - Moved rescheduleCount from persistent store to local variable
+ *                     - Before: rescheduleCount accumulated forever in store → negative counts (-45!)
+ *                     - After: rescheduleCount resets each batch → accurate counts
+ *                     - Fixes "Parsed -45 matches" bug from persistent accumulation
+ *                     - rescheduleCount now tracked per updateTablesMessageFromPairs call
+ * v3.9.8 (2025-11-11) - BUGFIX: Fixed successCount to only count NEW schedules
+ *                     - Changed actuallyUpdated calculation to subtract rescheduleCount
+ *                     - Before: Re-schedules counted toward successCount even without confirmations
+ *                     - After: Only NEW schedules counted, matching confirmation count
+ *                     - Fixes final piece of "Parsed 8 vs Scheduled 9" mismatch
+ * v3.9.7 (2025-11-11) - IMPROVEMENT: Smart confirmation creation for re-schedules
+ *                     - Removed hardcoded skipScheduled=true (now respects UI checkbox)
+ *                     - Track re-schedules separately from new schedules (rescheduleCount)
+ *                     - Only create Discord confirmations for NEW schedules, not re-schedules
+ *                     - Allows re-processing during development (regex fixes, testing)
+ *                     - With "Skip Already Scheduled" checkbox: Skips entirely, no re-processing
+ *                     - Without checkbox: Re-processes but doesn't spam confirmations
+ *                     - Fixes count mismatch without breaking development workflow
+ * v3.9.6 (2025-11-11) - BUGFIX: Handle Discord 2000 character limit for batch summaries
+ *                     - Added automatic message splitting when batch summary exceeds 1900 chars
+ *                     - Prevents last confirmation from being truncated mid-link
+ *                     - Before: Long summaries cut off, showing "[Jump to message](⁠match-alerts⁠" (truncated)
+ *                     - After: Splits into multiple messages if needed, preserving all links
+ *                     - Each message chunk stays safely under Discord's 2000 char limit
+ * v3.9.5 (2025-11-11) - BUGFIX: Skip already-scheduled matches to fix count mismatch
+ *                     - Enabled skipScheduled option by default when processing messages
+ *                     - Prevents re-scheduling existing matches (e.g., during historical backfill)
+ *                     - Before: Re-scheduled matches counted as updated, created confirmations
+ *                     - After: Already-scheduled matches skipped, only NEW schedules create confirmations
+ *                     - Fixes "Parsed 8 matches" vs "Scheduled 9 matches" mismatch
+ *                     - Logs: "⏭️ Skipping already-scheduled: division • team1 vs team2 • time"
+ * v3.9.4 (2025-11-11) - BUGFIX: Fixed count mismatch between parsed matches and confirmations
+ *                     - Changed actuallyUpdated from hardcoded 1 to actual updateResult.updated count
+ *                     - Before: Always returned 1 when any matches scheduled, regardless of count
+ *                     - After: Returns actual number of pairs scheduled from updateTablesMessageFromPairs
+ *                     - Added DEBUG logging to track confirmation creation and collection
+ *                     - Logs: "✉️ Created confirmation..." and "📬 Confirmation added..."
+ *                     - Helps diagnose mismatches between "Parsed X matches" and "Scheduled Y matches"
+ * v3.9.3 (2025-11-11) - BUGFIX: Validate Discord message links before adding to confirmations
+ *                     - Added URL validation to ensure links start with https:// or http://
+ *                     - Prevents malformed links like "[Jump to message](⁠match-alerts⁠" from being added
+ *                     - If buildDiscordMessageLink returns invalid/empty result, skip link entirely
+ *                     - Improves robustness when channel ID or guild ID is missing/incorrect
+ * v3.9.2 (2025-11-11) - BUGFIX: Retain author mentions and message links in batch summary
+ *                     - Fixed regex extraction to keep "Scheduled by @user" and "[Jump to message]" links
+ *                     - Before: "• Gold • map • TEAM1 vs TEAM2 • time" (missing author/link)
+ *                     - After: "• Gold • map • TEAM1 vs TEAM2 • time • Scheduled by @user • [Jump to message](...)"
+ *                     - Preserves attribution and quick access to original schedule messages
+ * v3.9.1 (2025-11-11) - BUGFIX: Fixed match counter when multiple pairs scheduled from one message
+ *                     - successCount/tentativeCount now increment by actual number of matches (res.updated), not 1 per message
+ *                     - Fixes discrepancy where "Parsed 9 matches" but "Scheduled 10 matches" displayed
+ *                     - Example: Message scheduling 2 pairs now counts as 2 matches, not 1
+ * v3.9.0 (2025-11-11) - MAJOR PERFORMANCE & UX ENHANCEMENTS
+ *                     - 🎯 BATCHED CONFIRMATIONS: Consolidate individual schedule confirmations into single summary
+ *                       • Before: 8 separate messages (":white_check_mark: Gold • THUNDER vs ICYHOT..." × 8)
+ *                       • After: 1 summary message ("✅ Scheduled 8 matches: • Gold • map • teams • time...")
+ *                       • Prevents Discord spam, easier to scan, guaranteed delivery before timeout
+ *                     - ⚡ CACHE PERSISTENCE: Reuse caches when clicking "Continue" within 5 minutes
+ *                       • Saves ~180 sheet reads per batch on immediate continues
+ *                       • Auto-clears after 5min to ensure data freshness
+ *                       • Logged: "⚡ Reusing caches from 23s ago" or "🔄 Cleared caches (12 minutes since last batch)"
+ *                     - 🐛 EMOJI DEDUPLICATION: Fix "NoGo NoGo" and "Team_Rodeo Rodeo" duplicate names
+ *                       • Happens when captains use both team name AND team emoji
+ *                       • Added word deduplication: "NoGo <:NoGo:123>" → "NoGo" (not "NoGo NoGo")
+ *                       • Improves fuzzy matching accuracy and reduces matcher workload
+ *                     - 🔍 DEBUG LOGGING IMPROVED: Team match results now show FINAL state (after fallback)
+ *                       • Before: Logged first attempt → showed null even when fallback succeeded
+ *                       • After: Logged after fallback → always shows actual match result
+ *                       • Eliminates confusion about "matchA=null" that actually scheduled
+ *                     - 📊 LOGGING ALREADY OPTIMIZED: Confirmed rendering logs already deduplicated per week
+ *                       • _renderedWeeksThisExecution prevents duplicate "📋 Rendering week..." logs
+ *                       • No changes needed - working as intended!
+ * v3.8.5 (2025-11-09) - BUGFIX: Handle em-dash wrapped division labels and leading punctuation
+ *                     - Enhanced division label stripping to handle em-dashes: "—BRONZE—"
+ *                     - Added leading punctuation removal from side B after split
+ *                     - Fixes "—BRONZE—\nNoGo vs. Rifle Nades;" where em-dash delimiter was not recognized
+ *                     - Pattern now matches: "BRONZE:", "—BRONZE—", "Bronze -", etc.
+ * v3.8.4 (2025-11-09) - BUGFIX: Strip "week N" pattern from team names in schedule parsing
+ *                     - Added regex to remove "week 4", "week 10", etc. from side B in splitVsSides()
+ *                     - Fixes "The Rodeo vs the Wickeds week 4" where "week 4" is metadata
+ *                     - Pattern: /\bweek\s+\d+\b.(wildcard)/i strips "week" followed by numbers
+ *                     - Prevents week numbers from being included in team name matching
+ * v3.8.3 (2025-11-09) - BUGFIX: Fixed regex typo in common map names
+ *                     - Removed double pipe (||) between "harrington" and "anzio" in map names regex
+ *                     - Double pipe created empty alternative that could break regex matching
+ *                     - Fixes "Anzio soul vs Over" where Anzio wasn't being stripped
+ *                     - Added debug logging to show map stripping results
  * v3.8.2 (2025-11-09) - BUGFIX: Enhanced possessive handling for curly apostrophes and spacing
  *                     - Handle both ASCII (') and curly (') apostrophes in possessives
  *                     - Handle spaced possessives: "Wicked ' s" → "Wickeds"
@@ -211,13 +324,11 @@
  *                     - Automatic weekly board posting
  */
 
-const VERSION = '3.8.2';
-const VERSION_DATE = '2025-11-09';
-
 // ---- DEBUG SETTINGS ----
 var DEBUG_PARSER = false;  // Toggle verbose parser logging (🔍, 🗺️, 📈 messages)
 
 // ---- DISCORD RELAY ----
+//CODE_TO_GENERATE_SECRET = 'node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"';
 const RELAY_BASE = 'RELAY_BASE';
 const RELAY_AUTH = 'RELAY_AUTH';
 
@@ -275,6 +386,7 @@ const POLL_SOFT_DEADLINE_MS = 4.5 * 60 * 1000; // ~4.5 minutes
 const LOOKUP_CACHE_TTL_SEC = 6 * 60 * 60;     // 6 hours
 
 // ---- WEB APP CONTROL PANEL ----
+//CODE_TO_GENERATE_SECRET = 'node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"';
 const WM_WEBAPP_SHARED_SECRET = 'WM_WEBAPP_SHARED_SECRET';
 
 // ---- EMBED STYLE (for header) ----

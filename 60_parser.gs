@@ -162,7 +162,7 @@ function stripMapHint(text) {
   // Additional fallback: Remove common DoD map name prefixes when they appear before team names
   // Matches common map names like "Railyard", "Railroad", "Anjou", etc. when followed by a team name
   // This helps when map isn't in catalog yet or captain uses shorthand
-  var commonMapNames = /\b(railyard|railroad|harrington||anzio|solitude|anjou|lennon|armory|aleutian|saints?|push)\b/gi;
+  var commonMapNames = /\b(railyard|railroad|harrington|anzio|solitude|anjou|lennon|armory|aleutian|saints?|push)\b/gi;
   t = t.replace(commonMapNames, ' ').replace(/\s+/g, ' ').trim();
 
   return t;
@@ -222,6 +222,12 @@ function stripDiscordNoise(s) {
 
   // collapse multiple spaces
   t = t.replace(/\s+/g, ' ').trim();
+
+  // NEW: Deduplicate consecutive identical words (e.g., "NoGo NoGo" → "NoGo")
+  // This happens when captains write both team name AND use team emoji: "NoGo <:NoGo:123>"
+  // Case-insensitive matching to handle "Team_Rodeo Rodeo", "NoGo NoGo", etc.
+  t = t.replace(/\b(\w+)\s+\1\b/gi, '$1');
+
   return t;
 }
 
@@ -257,8 +263,13 @@ function splitVsSides(s) {
 
 
   var a = parts[0], b = parts.slice(1).join(' ');
-  a = a.replace(/^(bronze|silver|gold)\s*:?\s*/i, '').trim();
-  b = b.replace(/^(bronze|silver|gold)\s*:?\s*/i, '').trim();
+  // Strip division labels with various delimiters (colon, em-dash, etc.)
+  // Matches: "BRONZE:", "—BRONZE—", "Bronze -", etc.
+  a = a.replace(/^[—\-]*\s*(bronze|silver|gold)\s*[—\-:]*\s*/i, '').trim();
+  b = b.replace(/^[—\-]*\s*(bronze|silver|gold)\s*[—\-:]*\s*/i, '').trim();
+
+  // Strip leading punctuation from side B (leftover from split on "vs.")
+  b = b.replace(/^[.,;:!?\s]+/, '').trim();
 
   // Strip everything after a slash when used as separator (not part of a date)
   // Example: "GVMH / week 4 armory / 3pm est" → "GVMH"
@@ -272,6 +283,7 @@ function splitVsSides(s) {
   b = b.replace(/\b\d{1,2}[:/]\d{1,2}.*$/i, '').trim(); // Times like 9:00, 21h
   b = b.replace(/\b\d{1,2}\s*(am|pm|est|edt|et|cet|brt).*$/i, '').trim(); // 9pm EST, 4pm est
   b = b.replace(/\b\d{1,2}\/\d{1,2}.*$/i, '').trim(); // Dates like 26/10, 11/2
+  b = b.replace(/\bweek\s+\d+\b.*/i, '').trim(); // Strip "week 4", "week 10", etc.
 
   // Strip trailing punctuation and lowercase 'the'
   a = a.replace(/^the\s+/i, '').replace(/[!?.]+$/, '').trim();
@@ -871,16 +883,47 @@ function pollAndProcessFromId(channelId, startId, opt) {
   var stoppedEarly = false;
   var stopReason = '';
 
+  // NEW: Collect confirmation messages for batching
+  var confirmations = [];
+
   // Pass channelId through options for message link building
   opt.channelId = channelId;
 
-  // Clear batch-level caches at start of batch for fresh data
-  // This dramatically improves performance by avoiding ~180 sheet reads per message
-  BATCH_WEEK_LIST_CACHE = null;
+  // NEW: Cache persistence with timestamp check
+  // If user clicks "Continue" within 5 minutes, keep caches for performance
+  // Otherwise clear them to ensure fresh data
+  var CACHE_PERSIST_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+  var lastBatchTime = 0;
+  try {
+    var lastBatchStr = PropertiesService.getScriptProperties().getProperty('LAST_BATCH_TIMESTAMP');
+    if (lastBatchStr) lastBatchTime = parseInt(lastBatchStr, 10) || 0;
+  } catch (e) {
+    // Ignore errors reading timestamp
+  }
 
-  // Clear team data caches (defined in 05_util.gs) to ensure fresh data per batch
-  if (typeof TEAM_ALIAS_CACHE !== 'undefined') TEAM_ALIAS_CACHE = null;
-  if (typeof TEAM_INDEX_CACHE !== 'undefined') TEAM_INDEX_CACHE = null;
+  var timeSinceLastBatch = startTime - lastBatchTime;
+  var shouldClearCaches = (timeSinceLastBatch > CACHE_PERSIST_WINDOW_MS) || !lastBatchTime;
+
+  if (shouldClearCaches) {
+    // Clear batch-level caches for fresh data
+    // This dramatically improves performance by avoiding ~180 sheet reads per message
+    BATCH_WEEK_LIST_CACHE = null;
+
+    // Clear team data caches (defined in 05_util.gs) to ensure fresh data per batch
+    if (typeof TEAM_ALIAS_CACHE !== 'undefined') TEAM_ALIAS_CACHE = null;
+    if (typeof TEAM_INDEX_CACHE !== 'undefined') TEAM_INDEX_CACHE = null;
+
+    if (typeof logToSheet === 'function') {
+      var minutesSince = Math.round(timeSinceLastBatch / 60000);
+      logToSheet(`🔄 Cleared caches (${minutesSince} minutes since last batch)`);
+    }
+  } else {
+    // Keep caches from previous batch for performance
+    if (typeof logToSheet === 'function') {
+      var secondsSince = Math.round(timeSinceLastBatch / 1000);
+      logToSheet(`⚡ Reusing caches from ${secondsSince}s ago (within ${CACHE_PERSIST_WINDOW_MS/60000}min window)`);
+    }
+  }
 
   // 0) If inclusive: try to fetch/process the start message itself
   if (inclusive && startId) {
@@ -891,6 +934,10 @@ function pollAndProcessFromId(channelId, startId, opt) {
           var res0 = processOneDiscordMessage(msg0, startTime, opt);
           if (res0 && res0.updated) updatedPairs += res0.updated;
           if (res0 && res0.skipped) skippedPairs += res0.skipped;
+          // NEW: Collect confirmation message for batching
+          if (res0 && res0.confirmationMessage) {
+            confirmations.push(res0.confirmationMessage);
+          }
           lastId = String(msg0.id || lastId);
         } catch (e) {
           errors.push('process ' + String(msg0.id) + ': ' + String(e && e.message || e));
@@ -969,11 +1016,20 @@ function pollAndProcessFromId(channelId, startId, opt) {
         var res = processOneDiscordMessage(msg, startTime, opt);
         if (res && res.updated) {
           updatedPairs += res.updated;
-          if (res.tentative) tentativeCount++;
-          else successCount++;
+          // FIX: Increment by actual number of matches scheduled, not just 1 per message
+          if (res.tentative) tentativeCount += res.updated;
+          else successCount += res.updated;
         }
         if (res && res.skipped) {
           skippedPairs += res.skipped;
+        }
+        // NEW: Collect confirmation message for batching
+        if (res && res.confirmationMessage) {
+          confirmations.push(res.confirmationMessage);
+          // DEBUG: Log mismatch between updated count and confirmations
+          if (DEBUG_PARSER && typeof logToSheet === 'function') {
+            logToSheet(`📬 Confirmation added (res.updated=${res.updated || 0}), total confirmations: ${confirmations.length}`);
+          }
         }
         lastId = String(msg.id || lastId);
       } catch (e) {
@@ -999,6 +1055,13 @@ function pollAndProcessFromId(channelId, startId, opt) {
   // 2) Persist last pointer
   if (lastId) setPointer(lastId);
 
+  // NEW: Save batch completion timestamp for cache persistence
+  try {
+    PropertiesService.getScriptProperties().setProperty('LAST_BATCH_TIMESTAMP', String(Date.now()));
+  } catch (e) {
+    // Ignore errors saving timestamp
+  }
+
   // Calculate execution stats
   var elapsed = Date.now() - startTime;
   var elapsedSec = Math.round(elapsed / 1000);
@@ -1007,10 +1070,71 @@ function pollAndProcessFromId(channelId, startId, opt) {
   // Enhanced logging with stats
   logParsingSummary(successCount, tentativeCount, opt.channelName || 'match-alerts');
 
+  // NEW: Send batched confirmation summary to Discord (before time runs out)
+  if (confirmations.length > 0) {
+    // Build compact summary message
+    var summaryHeader = confirmations.length === 1
+      ? '✅ Scheduled 1 match:'
+      : `✅ Scheduled ${confirmations.length} matches:`;
+
+    // Extract just the essential info from each confirmation (keep author and link)
+    var summaryLines = confirmations.map(function(conf) {
+      // Extract everything after the first emoji/season info
+      // Format: ":white_check_mark: KTP Season 8 :KTP: Gold • `map` • TEAM1 vs TEAM2 • time • Scheduled by @user • [Jump to message](...)"
+      // We want: "• Gold • `map` • TEAM1 vs TEAM2 • time • Scheduled by @user • [Jump to message](...)"
+
+      // Remove the leading emoji and season info, keep everything from division onwards
+      var match = conf.match(/(Bronze|Silver|Gold)\s+•\s+(.+)$/);
+      if (match) {
+        return `• ${match[1]} • ${match[2]}`;
+      }
+      // Fallback: just show the whole line
+      return '• ' + conf.replace(/:white_check_mark:|✅/g, '').trim();
+    });
+
+    var batchSummary = summaryHeader + '\n' + summaryLines.join('\n');
+
+    // Discord has a 2000 character limit - if we exceed it, split into multiple messages
+    if (batchSummary.length > 1900) {
+      // Send header separately
+      sendLog(summaryHeader);
+
+      // Send lines in chunks to stay under limit
+      var chunk = '';
+      for (var i = 0; i < summaryLines.length; i++) {
+        var line = summaryLines[i];
+        if ((chunk + line + '\n').length > 1900) {
+          // Send current chunk
+          if (chunk) sendLog(chunk.trim());
+          chunk = line + '\n';
+        } else {
+          chunk += line + '\n';
+        }
+      }
+      // Send remaining chunk
+      if (chunk) sendLog(chunk.trim());
+    } else {
+      sendLog(batchSummary);
+    }
+  }
+
   if (stoppedEarly) {
     sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - stopped: ${stopReason}`);
   } else {
     sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - finished all available`);
+  }
+
+  // NEW: Check for pending alias suggestion DM replies
+  var aliasResults = {processed: 0, added: 0, skipped: 0};
+  if (typeof checkAndProcessAliasSuggestions === 'function') {
+    try {
+      aliasResults = checkAndProcessAliasSuggestions();
+    } catch (e) {
+      // Ignore errors in alias processing - don't break the main batch
+      if (typeof logToSheet === 'function') {
+        logToSheet('⚠️ Error checking alias suggestions: ' + String(e && e.message || e));
+      }
+    }
   }
 
   return {
@@ -1021,7 +1145,8 @@ function pollAndProcessFromId(channelId, startId, opt) {
     lastPointer: lastId,
     stoppedEarly: stoppedEarly,
     stopReason: stopReason,
-    elapsedMs: elapsed
+    elapsedMs: elapsed,
+    aliasResults: aliasResults  // Include alias processing results
   };
 }
 
@@ -1050,6 +1175,7 @@ function processOneDiscordMessage(msg, startTime, options) {
   let isTentative = false;
   let isRematch = false;
   let updateResult = null;  // Declare here so it's accessible throughout the function
+  let confirmationMessage = null;  // NEW: Collect confirmation instead of sending immediately
   try {
     raw = msg.content;
 
@@ -1076,7 +1202,7 @@ function processOneDiscordMessage(msg, startTime, options) {
       if (DEBUG_PARSER) sendLog(`📅 No message timestamp available`);
     }
 
-    parsed = parseScheduleMessage_v3(raw, messageDate);
+    parsed = parseScheduleMessage_v3(raw, messageDate, msg);
 
     // Log parsed result to sheet only (verbose - DEBUG mode only)
     if (DEBUG_PARSER && typeof logToSheet === 'function') {
@@ -1104,8 +1230,11 @@ function processOneDiscordMessage(msg, startTime, options) {
     // Update tables: find row, update store, refresh Discord board
     try {
       if (typeof updateTablesMessageFromPairs === 'function' && parsed.pairs && parsed.weekKey) {
+        // Pass options through (including skipScheduled if user checked it in UI)
         updateResult = updateTablesMessageFromPairs(parsed.weekKey, parsed.pairs, options);
 
+        // Create confirmations for all successful updates (including re-schedules)
+        // This allows testing/development to see full parse results
         if (updateResult.updated > 0) {
           // Build message link if possible
           var messageLink = '';
@@ -1122,7 +1251,10 @@ function processOneDiscordMessage(msg, startTime, options) {
             // if (typeof logToSheet === 'function') {
             //   logToSheet(`🔗 Built link: "${link}"`);
             // }
-            if (link) messageLink = ` • [Jump to message](${link})`;
+            // Only add link if it's valid (starts with https:// or http://)
+            if (link && /^https?:\/\//.test(link)) {
+              messageLink = ` • [Jump to message](${link})`;
+            }
           }
 
           // Build schedule confirmation message
@@ -1149,13 +1281,19 @@ function processOneDiscordMessage(msg, startTime, options) {
             }
 
             // Build streamlined combined message
-            combinedMessage = `:white_check_mark: ${seasonInfo}${ktpEmoji} ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`;
+            confirmationMessage = `:white_check_mark: ${seasonInfo}${ktpEmoji} ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`;
           } else {
             // No weekly notice - just schedule confirmation
-            combinedMessage = `✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`;
+            confirmationMessage = `✅ ${parsed.division} • \`${parsed.weekKey.split('|')[1] || '?'}\` • ${parsed.team1} vs ${parsed.team2} • ${parsed.whenText} • Scheduled  by <@${msg.author?.id || 'unknown'}>${messageLink}`;
           }
 
-          sendLog(combinedMessage);
+          // DEBUG: Log confirmation creation
+          if (DEBUG_PARSER && typeof logToSheet === 'function') {
+            logToSheet(`✉️ Created confirmation for ${parsed.team1} vs ${parsed.team2} (updateResult.updated=${updateResult.updated})`);
+          }
+
+          // NEW: Don't send immediately - return for batching
+          // sendLog(combinedMessage);
         }
 
         // Note: Skip logging is handled verbosely in 70_updates.gs (shows team names)
@@ -1175,15 +1313,17 @@ function processOneDiscordMessage(msg, startTime, options) {
     return { updated: 0 };
   }
 
-  // Only count as updated if we actually scheduled something (not skipped/unmatched)
-  var actuallyUpdated = (updateResult && updateResult.updated > 0) ? 1 : 0;
+  // Count all successful updates (including re-schedules when skipScheduled is disabled)
+  // This allows full testing/development visibility
+  var actuallyUpdated = (updateResult && updateResult.updated) ? updateResult.updated : 0;
   var actuallySkipped = (updateResult && updateResult.skipped > 0) ? updateResult.skipped : 0;
 
   return {
-    updated: actuallyUpdated,
+    updated: actuallyUpdated,  // All successful updates (re-schedules + new)
     skipped: actuallySkipped,
     tentative: isTentative,
-    parsed: parsed
+    parsed: parsed,
+    confirmationMessage: confirmationMessage  // Confirmation for batching
   };
 }
 
@@ -1192,10 +1332,14 @@ function processOneDiscordMessage(msg, startTime, options) {
  * Returns { ok, pairs: [{division, home, away, epochSec?, whenText, weekKey}], trace }
  * @param {string} text - Raw Discord message text
  * @param {Date} messageDate - Optional Discord message timestamp for historical week matching
+ * @param {Object} messageObj - Optional full Discord message object for DM suggestions
  * @returns {Object} {ok: boolean, pairs?: array, division?: string, team1?: string, team2?: string, whenText?: string, weekKey?: string, trace: array, error?: string}
  */
-function parseScheduleMessage_v3(text, messageDate) {
+function parseScheduleMessage_v3(text, messageDate, messageObj) {
   var trace = [];
+  // Store message object in trace for alias suggestions
+  if (messageObj) trace.messageObj = messageObj;
+
   // Don't clear caches here - let them persist across messages in the same batch
   // (caches in 05_util.gs will naturally persist until explicitly cleared)
   try {
@@ -1212,8 +1356,10 @@ function parseScheduleMessage_v3(text, messageDate) {
 
     // Strip map hint from text before splitting teams (prevents "dod_railyard_b6 NoGo" being treated as team name)
     var cleanedForTeams = stripMapHint(cleaned);
-    if (DEBUG_PARSER && cleanedForTeams !== cleaned && typeof logToSheet === 'function') {
+    if (cleanedForTeams !== cleaned && typeof logToSheet === 'function') {
       logToSheet(`🗺️ Stripped map from text: "${cleaned}" → "${cleanedForTeams}"`);
+    } else if (typeof logToSheet === 'function') {
+      logToSheet(`🗺️ No map stripped from: "${cleaned}"`);
     }
 
     // teams
@@ -1227,11 +1373,6 @@ function parseScheduleMessage_v3(text, messageDate) {
     var matchA = matchTeam(sides.a, hintDiv);
     var matchB = matchTeam(sides.b, hintDiv);
 
-    // Debug logging for team matching
-    if (typeof logToSheet === 'function') {
-      logToSheet(`🔍 Team matching: sides.a="${sides.a}" → matchA=${matchA ? matchA.name : 'null'}, sides.b="${sides.b}" → matchB=${matchB ? matchB.name : 'null'}`);
-    }
-
     // If not found with hint, try without hint (hint might be wrong)
     if ((!matchA || !matchB) && hintDiv) {
       var matchA2 = matchTeam(sides.a, null);
@@ -1244,7 +1385,33 @@ function parseScheduleMessage_v3(text, messageDate) {
       }
     }
 
+    // Debug logging for team matching (AFTER fallback, so shows final result)
+    if (typeof logToSheet === 'function') {
+      logToSheet(`🔍 Team matching: sides.a="${sides.a}" → matchA=${matchA ? matchA.name : 'null'}, sides.b="${sides.b}" → matchB=${matchB ? matchB.name : 'null'}`);
+    }
+
     if (!matchA || !matchB) {
+      // NEW: Send DM suggestion for unmatched team
+      if (trace && trace.messageObj) {
+        var failedInput = !matchA ? sides.a : sides.b;
+        var suggestion = (typeof suggestTeamAlias === 'function') ? suggestTeamAlias(failedInput, hintDiv) : null;
+
+        if (trace.messageObj.author && trace.messageObj.author.id) {
+          if (typeof sendAliasSuggestionDM === 'function') {
+            sendAliasSuggestionDM(
+              trace.messageObj.author.id,
+              failedInput,
+              suggestion,
+              {
+                id: trace.messageObj.id,
+                channel_id: trace.messageObj.channel_id || trace.messageObj.channel?.id,
+                content: raw
+              }
+            );
+          }
+        }
+      }
+
       return { ok: false, error: 'team_not_found', detail: { a: !!matchA, b: !!matchB }, trace: trace };
     }
 

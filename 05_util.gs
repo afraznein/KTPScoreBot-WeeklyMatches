@@ -727,6 +727,139 @@ function getGridCols() {
   return { WL1: WL1, T1: T1, S1: S1, WL2: WL2, T2: T2, S2: S2 };
 }
 
+/**
+ * Read team names from Teams sheet and generate comprehensive alias suggestions.
+ * Teams sheet structure:
+ * - Row 2: Gold teams
+ * - Row 16: Silver teams
+ * - Row 30: Bronze teams
+ * @returns {Array<Object>} Array of {fullName, division, suggestedAliases[]}
+ */
+function analyzeTeamsForAliases() {
+  var sh = getSheetByName('Teams');
+  if (!sh) {
+    if (typeof logToSheet === 'function') logToSheet('⚠️ Teams sheet not found');
+    return [];
+  }
+
+  var results = [];
+  var divisions = [
+    { name: 'Gold', row: 2 },
+    { name: 'Silver', row: 16 },
+    { name: 'Bronze', row: 30 }
+  ];
+
+  for (var d = 0; d < divisions.length; d++) {
+    var div = divisions[d];
+    // Read entire row (assuming teams are in columns A onwards, reading 20 columns max)
+    var rowData = sh.getRange(div.row, 1, 1, 20).getValues()[0];
+
+    for (var i = 0; i < rowData.length; i++) {
+      var teamName = String(rowData[i] || '').trim();
+      if (!teamName) continue;
+
+      // Skip template teams (BRONZE A, SILVER B, etc.)
+      if (/^(bronze|silver|gold)\s+[a-z]$/i.test(teamName)) continue;
+
+      // Generate suggested aliases
+      var aliases = generateAliasesForTeam(teamName);
+
+      results.push({
+        fullName: teamName,
+        division: div.name,
+        suggestedAliases: aliases
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Generate suggested aliases for a team name.
+ * Examples:
+ *   "SOUL SKATERS" → ["soul", "skaters", "soul skaters"]
+ *   "THE CLINIC" → ["clinic", "the clinic"]
+ *   "GVMH" → ["gvmh"] (already short)
+ * @param {string} teamName - Full team name
+ * @returns {Array<string>} Array of suggested aliases
+ */
+function generateAliasesForTeam(teamName) {
+  var aliases = [];
+  var normalized = String(teamName || '').trim();
+
+  if (!normalized) return aliases;
+
+  // Always add the full lowercase version
+  var lower = normalized.toLowerCase();
+  aliases.push(lower);
+
+  // Split into words
+  var words = normalized.split(/\s+/);
+
+  // If multi-word, add individual words as aliases (unless they're common words)
+  var commonWords = ['the', 'a', 'an', 'of', 'and', 'or', 'vs'];
+  if (words.length > 1) {
+    for (var i = 0; i < words.length; i++) {
+      var word = words[i].toLowerCase();
+      if (word.length >= 3 && commonWords.indexOf(word) < 0) {
+        if (aliases.indexOf(word) < 0) aliases.push(word);
+      }
+    }
+  }
+
+  // Add acronym if multi-word (first letters)
+  if (words.length >= 2) {
+    var acronym = words.map(function(w) { return w.charAt(0); }).join('').toLowerCase();
+    if (acronym.length >= 2 && aliases.indexOf(acronym) < 0) {
+      aliases.push(acronym);
+    }
+  }
+
+  return aliases;
+}
+
+/**
+ * Log the comprehensive alias analysis to WM_Log sheet.
+ * Creates a report showing which aliases are missing from _Aliases sheet.
+ */
+function logMissingAliases() {
+  var teams = analyzeTeamsForAliases();
+  var existingAliases = loadTeamAliases(); // from _Aliases sheet
+
+  var report = ['📋 Alias Analysis Report', ''];
+  var missingCount = 0;
+
+  for (var i = 0; i < teams.length; i++) {
+    var team = teams[i];
+    var missing = [];
+
+    for (var j = 0; j < team.suggestedAliases.length; j++) {
+      var alias = team.suggestedAliases[j].toUpperCase();
+      if (!existingAliases[alias]) {
+        missing.push(team.suggestedAliases[j]);
+      }
+    }
+
+    if (missing.length > 0) {
+      report.push(`${team.division} • ${team.fullName}`);
+      report.push(`  Missing: ${missing.join(', ')}`);
+      missingCount += missing.length;
+    }
+  }
+
+  report.push('');
+  report.push(`Total missing aliases: ${missingCount}`);
+
+  if (typeof logToSheet === 'function') {
+    for (var k = 0; k < report.length; k++) {
+      logToSheet(report[k]);
+    }
+  }
+
+  return { teams: teams, missingCount: missingCount };
+}
+
 // ----- EXECUTION TIME MONITORING -----
 
 /**
