@@ -17,16 +17,89 @@
 //
 // =======================
 
-const VERSION = '3.11.0';
-const VERSION_DATE = '2025-11-11';
+const VERSION = '4.0.0';
+const VERSION_DATE = '2025-11-12';
 
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 3.11.0
- * Last Updated: 2025-11-11
+ * Version: 4.0.0
+ * Last Updated: 2025-11-12
  *
  * CHANGELOG:
+ * v4.0.0 (2025-11-12) - Alpha Release
+ *                      - FEATURE: Web UI for automatic polling management
+ *                      - NEW: server_clearAllScheduled() - Web endpoint to clear all scheduled matches
+ *                      - NEW: server_getPollingStatus() - Get current polling trigger status
+ *                      - NEW: server_enablePolling(secret, intervalMinutes) - Enable automatic polling via web
+ *                      - NEW: server_disablePolling(secret) - Disable automatic polling via web
+ *                      - NEW: Control panel section "⏰ Automatic Polling" with status, interval, and controls
+ *                      - Location: 50_webapp.gs (lines 655-730), ktp_control_panel.html (lines 298-324, 839-964)
+ *                      - UI Features: Real-time status display, configurable interval, clear schedules button
+ *                      - Impact: Full web-based management of automatic polling without needing Apps Script editor
+ * v3.11.8 (2025-11-12) - FEATURE: Automatic polling with schedule store management
+ *                      - NEW: clearAllScheduledMatches() - Clears all stored schedules to allow re-scheduling
+ *                      - NEW: setupAutomaticPolling(minutes) - Creates time-based trigger for automatic polling
+ *                      - NEW: removeAutomaticPolling() - Removes automatic polling triggers
+ *                      - NEW: automaticPollingHandler() - Trigger handler (polls without skipScheduled flag)
+ *                      - Location: 10_storage.gs (lines 129-234)
+ *                      - Usage: Run clearAllScheduledMatches() once, then setupAutomaticPolling(5) for 5-min intervals
+ *                      - Impact: Enables hands-free automatic polling that allows re-scheduling of matches
+ * v3.11.7 (2025-11-12) - BUGFIX: Strip conversational fragments from team names
+ *                      - FIXED: Messages with conversational prefixes now parse correctly
+ *                      - Example: "Uhhh gold? Soul vs Over" → Extracts "Soul" and "Over" (not "Uhhh gold? Soul")
+ *                      - Previous behavior: Conversational text like "Uhhh gold?" attached to team names
+ *                      - New behavior: Strips common conversational prefixes (uhhh, um, well, ok, etc.) and division mentions with punctuation
+ *                      - Location: splitVsSides() in 60_parser.gs (lines 327-329)
+ *                      - Impact: Allows parsing casual messages where captains add conversational context
+ * v3.11.6 (2025-11-12) - BUGFIX: Strip leading date patterns from side A (team names)
+ *                      - FIXED: Messages starting with dates now parse correctly
+ *                      - Example: "Sunday 9 VOLVO vs GVMH" → Extracts "VOLVO" and "GVMH" (not "Sunday 9 VOLVO")
+ *                      - Previous behavior: Leading dates attached to team names caused match failures
+ *                      - New behavior: Strips day-of-week + optional day number from start of side A
+ *                      - Location: splitVsSides() in 60_parser.gs (line 323)
+ *                      - Impact: Allows parsing messages that start with date before team names
+ *                      - Note: Parser currently supports ONE match per message (multi-match messages require separate lines)
+ * v3.11.5 (2025-11-12) - BUGFIX: Strip standalone "week" leftover from map name stripping
+ *                      - FIXED: Messages like "Team A vs Team B Saints week Sunday..." now parse correctly
+ *                      - Example: "Morons vs Clinic Saints week Sunday..." → After map strip: "...Clinic week Sunday..." → Final: "Clinic"
+ *                      - Previous behavior: "Clinic week" failed to match team (had extra "week" word)
+ *                      - New behavior: Strips standalone "week" word after date/time stripping
+ *                      - Location: splitVsSides() in 60_parser.gs (line 334)
+ *                      - Impact: Fixes parsing when map names like "Saints week" get partially stripped
+ * v3.11.4 (2025-11-12) - ENHANCEMENT: Allow rescheduling of POSTPONED and TBD matches
+ *                      - CHANGED: "Skip already scheduled" checkbox now allows updates to POSTPONED/TBD matches
+ *                      - Previous behavior: POSTPONED matches were skipped (couldn't be rescheduled)
+ *                      - New behavior: Only matches with real times are skipped; POSTPONED/TBD can be updated
+ *                      - Example: Match scheduled as "POSTPONED" → Captain posts real time → Updates to new time
+ *                      - Location: applyScheduleUpdatesFromPairs() in 70_updates.gs (lines 196-197)
+ *                      - Impact: Captains can now reschedule postponed matches without unchecking the skip box
+ * v3.11.3 (2025-11-12) - BUGFIX: Handle multiple "vs" delimiters in messages with prose text
+ *                      - FIXED: Messages with prose text before team names now parse correctly
+ *                      - Example: "We continue... vs Volvo... vs Price is delayed" → Extracts Volvo and Price
+ *                      - Previous behavior: First "vs" split extracted prose text as team A (matched to wrong team)
+ *                      - New behavior: Detects prose in first part, uses last two parts as teams
+ *                      - Location: splitVsSides() in 60_parser.gs (lines 264-288)
+ *                      - Impact: Prevents false team matches when captains embed schedules in conversational messages
+ * v3.11.2 (2025-11-12) - FEATURE: Support postponement notifications
+ *                      - NEW: Messages containing "postponed", "delayed", "postpone", or "delay" are scheduled as "POSTPONED"
+ *                      - NEW: Parser now distinguishes between "TBD" (not yet scheduled) and "POSTPONED" (was scheduled, now delayed)
+ *                      - ENHANCED: Postponed matches use fallback week matching (finds ANY week with the matchup)
+ *                      - Example: "Volvo vs Price is delayed one week" → Scheduled as "POSTPONED" in their matchup week
+ *                      - Location: parseWhenFlexible() and parseScheduleMessage_v3() in 60_parser.gs
+ *                      - Impact: Captains can notify about postponements without manual sheet updates
+ * v3.11.1 (2025-11-11) - BUGFIX: Handle hybrid "vs" + semicolon format AND hyphen-wrapped division labels
+ *                      - FIXED: Messages with both "vs" AND semicolons now parse correctly
+ *                      - FIXED: Division labels like "-BRONZE-" no longer interfere with team splitting
+ *                      - Example: "-BRONZE- NoGo vs. Rico's; dod_thunder2; Sunday @ 9 PM"
+ *                      - Previous behavior:
+ *                        1. Semicolons caused incorrect team splitting
+ *                        2. "-BRONZE-" was treated as split delimiter (resulted in empty side A)
+ *                      - New behavior:
+ *                        1. Semicolons after "vs" are converted to spaces in preprocessing
+ *                        2. Leading division labels stripped before splitting (prevents hyphen conflicts)
+ *                      - Location: cleanScheduleText() in 60_parser.gs
+ *                      - Impact: Prevents "no_vs" parse errors for valid match schedules with division prefixes
  * v3.11.0 (2025-11-11) - FEATURE: Smart Alias Suggestions via DM
  *                      - NEW: Auto-detect failed team matches and send DM suggestions to captains
  *                      - NEW: analyzeTeamsForAliases() reads Teams sheet (rows 2/16/30) and generates comprehensive alias list
@@ -337,8 +410,8 @@ const DISCORD_GUILD_ID = '996884268804493363';  // KTP Discord server ID
 
 // Channels
 const SCHED_INPUT_CHANNEL_ID = '1063529682919755927';  // captains post schedules
-const WEEKLY_POST_CHANNEL_ID = '1419183947207938048';  // weekly board lives here
-const RESULTS_LOG_CHANNEL_ID = '1419183998147493939';  // logs/alerts/messages
+const WEEKLY_POST_CHANNEL_ID = '1081260197340794920';  // weekly board lives here
+const RESULTS_LOG_CHANNEL_ID = '1438133465014079551';  // logs/alerts/messages
 
 // Emoji / Roles
 const SHOUTCAST_EMOJI_NAME = 'Shoutcast';               // e.g., 'Shoutcast'
@@ -382,7 +455,7 @@ const GLOBAL_SCHED_KEY = 'WEEKLY_GLOBAL_SCHEDULES';
 
 // ---- PERFORMANCE / BEHAVIOR ----
 const POLL_MAX_MESSAGES_PER_RUN = 10;  // Increased from 5 due to batch caching improvements
-const POLL_SOFT_DEADLINE_MS = 4.5 * 60 * 1000; // ~4.5 minutes
+const POLL_SOFT_DEADLINE_MS = 4.75 * 60 * 1000; // ~4.75 minutes
 const LOOKUP_CACHE_TTL_SEC = 6 * 60 * 60;     // 6 hours
 
 // ---- WEB APP CONTROL PANEL ----

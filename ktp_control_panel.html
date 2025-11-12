@@ -295,6 +295,34 @@
         </div>
       </div>
 
+      <!-- Automatic Polling -->
+      <div class="card" style="grid-column: span 12; border: 2px solid var(--accent);">
+        <h2>⏰ Automatic Polling</h2>
+        <div class="footer-note" style="margin-top: 0; margin-bottom: 10px;">
+          <strong>Automatic mode:</strong> Set up time-based triggers to automatically poll for new messages and schedule matches. Runs like manual polling but on a timer.
+        </div>
+        <div class="row">
+          <label>Status</label>
+          <span id="pollingStatus" class="pill" style="color: var(--muted);">Loading...</span>
+          <button id="btnRefreshStatus" class="btn" style="font-size: 11px; padding: 6px 10px;">🔄 Refresh</button>
+        </div>
+        <div class="row">
+          <label for="pollingInterval">Interval (minutes)</label>
+          <input id="pollingInterval" type="number" value="5" min="1" max="60" style="width: 100px;" />
+          <span style="font-size: 11px; color: var(--muted);">Recommended: 5 minutes</span>
+        </div>
+        <div class="row">
+          <button id="btnEnablePolling" class="btn ok">✅ Enable Automatic Polling</button>
+          <button id="btnDisablePolling" class="btn danger">⛔ Disable Automatic Polling</button>
+        </div>
+        <div class="row" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #374151;">
+          <button id="btnClearScheduled" class="btn warn">🗑️ Clear All Scheduled Matches</button>
+          <span style="font-size: 11px; color: var(--muted); margin-left: 8px;">
+            Clears stored schedules to allow re-scheduling. Useful before enabling automatic polling.
+          </span>
+        </div>
+      </div>
+
       <!-- Weekly Board -->
       <div class="card" style="grid-column: span 12;">
         <h2>Weekly Board</h2>
@@ -807,6 +835,133 @@
       } catch (e) {}
     };
     $('dbgClear').onclick = () => { $('debugOut').textContent = ''; };
+
+    // ========== Automatic Polling Management ==========
+
+    // Load polling status on page load and update UI
+    function loadPollingStatus() {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) {
+        $('pollingStatus').textContent = 'Enter secret first';
+        $('pollingStatus').style.color = 'var(--muted)';
+        return;
+      }
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok && res.data) {
+          const enabled = res.data.enabled;
+          const count = res.data.count || 0;
+
+          if (enabled) {
+            $('pollingStatus').textContent = `🟢 Enabled (${count} trigger${count !== 1 ? 's' : ''})`;
+            $('pollingStatus').style.color = 'var(--ok)';
+            $('pollingStatus').style.borderColor = 'var(--ok)';
+          } else {
+            $('pollingStatus').textContent = '⚪ Disabled';
+            $('pollingStatus').style.color = 'var(--muted)';
+            $('pollingStatus').style.borderColor = '#374151';
+          }
+        } else {
+          $('pollingStatus').textContent = '❌ Error';
+          $('pollingStatus').style.color = 'var(--err)';
+        }
+      }).withFailureHandler(e => {
+        $('pollingStatus').textContent = '❌ Error: ' + e.message;
+        $('pollingStatus').style.color = 'var(--err)';
+      }).server_getPollingStatus(secret);
+    }
+
+    // Refresh status button
+    $('btnRefreshStatus').onclick = () => {
+      out('▶ Refreshing polling status...');
+      loadPollingStatus();
+    };
+
+    // Enable automatic polling
+    $('btnEnablePolling').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('❌ Missing secret','err'); return; }
+
+      const interval = parseInt($('pollingInterval').value) || 5;
+      if (interval < 1 || interval > 60) {
+        out('❌ Interval must be between 1 and 60 minutes', 'err');
+        return;
+      }
+
+      if (!confirm(`✅ Enable automatic polling?\n\n• Interval: Every ${interval} minute${interval !== 1 ? 's' : ''}\n• Behavior: Polls from last pointer, allows re-scheduling\n\nThis will create a time-based trigger that runs automatically.`)) {
+        out('❌ Enable cancelled', 'err');
+        return;
+      }
+
+      setBusy(true, 'Enabling polling...');
+      out(`▶ Enabling automatic polling (${interval} minute interval)...`);
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok) {
+          out(`✅ Automatic polling enabled:\n  Trigger ID: ${res.data.triggerId}\n  Interval: ${res.data.interval} minutes`, 'ok');
+          loadPollingStatus(); // Refresh status
+        } else {
+          out('❌ ' + (res && res.error), 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_enablePolling(secret, interval);
+    };
+
+    // Disable automatic polling
+    $('btnDisablePolling').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('❌ Missing secret','err'); return; }
+
+      if (!confirm('⛔ Disable automatic polling?\n\nThis will remove all automatic polling triggers. You can re-enable it anytime.')) {
+        out('❌ Disable cancelled', 'err');
+        return;
+      }
+
+      setBusy(true, 'Disabling polling...');
+      out('▶ Disabling automatic polling...');
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok) {
+          out(`✅ Automatic polling disabled:\n  Triggers removed: ${res.data.removed}`, 'ok');
+          loadPollingStatus(); // Refresh status
+        } else {
+          out('❌ ' + (res && res.error), 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_disablePolling(secret);
+    };
+
+    // Clear all scheduled matches
+    $('btnClearScheduled').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('❌ Missing secret','err'); return; }
+
+      if (!confirm('🗑️ Clear all scheduled matches from the store?\n\nThis will:\n• Remove all stored schedule data from ALL weeks\n• Keep other data (shoutcasters, etc.) intact\n• Allow re-scheduling of all matches\n\nUseful before enabling automatic polling to ensure all matches get fresh schedules.')) {
+        out('❌ Clear cancelled', 'err');
+        return;
+      }
+
+      setBusy(true, 'Clearing schedules...');
+      out('▶ Clearing all scheduled matches...');
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok) {
+          out(`✅ Cleared schedules from ${res.data.cleared} week store(s)`, 'ok');
+        } else {
+          out('❌ ' + (res && res.error), 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_clearAllScheduled(secret);
+    };
+
+    // Load polling status when secret is entered
+    $('secret').addEventListener('blur', loadPollingStatus);
+
+    // Load polling status on page load (after a short delay to let secret load from localStorage)
+    setTimeout(loadPollingStatus, 500);
 
 
   </script>

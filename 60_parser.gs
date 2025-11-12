@@ -261,8 +261,31 @@ function splitVsSides(s) {
   var parts = norm.split(/\bvs\.?\b| v\. |\/\/| - |;/i);
   if (parts.length < 2) return null;
 
+  // If we have MORE than 2 parts, it means there were multiple "vs" delimiters
+  // Example: "<prose> vs Team1 <prose> vs Team2" → [prose, Team1, Team2]
+  // In this case, check if the first part looks like prose text
+  var a, b;
+  if (parts.length > 2) {
+    // Check if first part is prose (many words with common prose indicators)
+    var firstPartWords = parts[0].trim().split(/\s+/).filter(function(w) { return w.length > 0; });
+    var prosePattern = /\b(the|of|and|or|we|continue|trend|season|match|game|this|that|these|those)\b/gi;
+    var firstPartProseWords = (parts[0].match(prosePattern) || []).length;
 
-  var a = parts[0], b = parts.slice(1).join(' ');
+    if (firstPartWords.length > 6 && firstPartProseWords > 2) {
+      // First part is prose - use the LAST two parts as teams
+      // This handles: "<prose> vs Team1 vs Team2" → teams are Team1 and Team2
+      a = parts[parts.length - 2];
+      b = parts[parts.length - 1];
+    } else {
+      // First part is not prose - use first two parts as usual
+      a = parts[0];
+      b = parts.slice(1).join(' ');
+    }
+  } else {
+    // Only 2 parts - standard case
+    a = parts[0];
+    b = parts.slice(1).join(' ');
+  }
   // Strip division labels with various delimiters (colon, em-dash, etc.)
   // Matches: "BRONZE:", "—BRONZE—", "Bronze -", etc.
   a = a.replace(/^[—\-]*\s*(bronze|silver|gold)\s*[—\-:]*\s*/i, '').trim();
@@ -270,6 +293,40 @@ function splitVsSides(s) {
 
   // Strip leading punctuation from side B (leftover from split on "vs.")
   b = b.replace(/^[.,;:!?\s]+/, '').trim();
+
+  // EARLY VALIDATION: Check for prose text BEFORE aggressive date/time stripping
+  // This allows us to detect second "vs" in messages like "<prose> vs Team1 <prose> vs Team2"
+  var aWords = a.split(/\s+/).filter(function(w) { return w.length > 0; });
+  var prosePattern = /\b(the|of|and|or|we|continue|trend|season|match|game|this|that|these|those)\b/gi;
+  var aProseWords = (a.match(prosePattern) || []).length;
+
+  // If side A has many prose words (> 2), check if there's a second "vs" in side B (before stripping)
+  if (aWords.length > 6 && aProseWords > 2) {
+    // Look for another "vs" delimiter in the UNSTRIPPED side B
+    var secondVsMatch = b.match(/^(.*?)\s+vs\.?\s+(.*)$/i);
+    if (secondVsMatch) {
+      // Found a second "vs" - use that instead, discarding the prose
+      a = secondVsMatch[1].trim();
+      b = secondVsMatch[2].trim();
+      // Strip division labels from new sides
+      a = a.replace(/^[—\-]*\s*(bronze|silver|gold)\s*[—\-:]*\s*/i, '').trim();
+      b = b.replace(/^[—\-]*\s*(bronze|silver|gold)\s*[—\-:]*\s*/i, '').trim();
+      b = b.replace(/^[.,;:!?\s]+/, '').trim();
+    } else {
+      // No second "vs" found - this is likely just prose, not a schedule message
+      return null;
+    }
+  }
+
+  // Strip LEADING date patterns from side A (messages that start with dates like "Sunday 9th Team vs...")
+  // Pattern: day-of-week followed by optional day number at the START of the string
+  a = a.replace(/^(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\s+\d*\s*/i, '').trim();
+
+  // Strip conversational fragments from side A (e.g., "Uhhh gold? Soul" → "Soul")
+  // Matches: "Uhhh", "Um", "Uh", etc. followed by optional punctuation and optional division mention
+  a = a.replace(/^(uhhh?|umm?|uhm|err?|well|so|ok|okay)\b[?!.,\s]*/i, '').trim();
+  // Also strip leading division mentions with question marks: "gold? Team" → "Team"
+  a = a.replace(/^(bronze|silver|gold)[?!.,\s]+/i, '').trim();
 
   // Strip everything after a slash when used as separator (not part of a date)
   // Example: "GVMH / week 4 armory / 3pm est" → "GVMH"
@@ -284,6 +341,7 @@ function splitVsSides(s) {
   b = b.replace(/\b\d{1,2}\s*(am|pm|est|edt|et|cet|brt).*$/i, '').trim(); // 9pm EST, 4pm est
   b = b.replace(/\b\d{1,2}\/\d{1,2}.*$/i, '').trim(); // Dates like 26/10, 11/2
   b = b.replace(/\bweek\s+\d+\b.*/i, '').trim(); // Strip "week 4", "week 10", etc.
+  b = b.replace(/\bweek\b\s*/i, '').trim(); // Strip standalone "week" (leftover from map name stripping)
 
   // Strip trailing punctuation and lowercase 'the'
   a = a.replace(/^the\s+/i, '').replace(/[!?.]+$/, '').trim();
@@ -309,11 +367,37 @@ function stripOrdinalSuffixes(rawDate) { return rawDate.replace(/(\d+)(st|nd|rd|
  * @returns {string} Cleaned text ready for parsing
  */
 function cleanScheduleText(raw) {
-  return raw
+  var cleaned = raw
     .replace(/\/\s*Domingo.*$/i, '')
     .replace(/\b\d{1,2}:\d{2}\s*(BRT|CET|UTC|GMT|JST|PST|PT|ART|IST).*/gi, '')
     .replace(/(\d+)(st|nd|rd|th)/gi, '$1')
     .replace(/tentative|confirm.*later|likely postponed|we'?ll confirm/gi, '');
+
+  // Strip leading division labels that are wrapped in hyphens/dashes
+  // Examples: "-BRONZE-", "—SILVER—", "--GOLD--"
+  // This must happen BEFORE splitVsSides() to prevent hyphen splitting issues
+  // The pattern matches division at start of string (with optional whitespace) followed by team names
+  cleaned = cleaned.replace(/^[\s\-—]*\s*(bronze|silver|gold)\s*[\s\-—]+/i, '');
+
+  // Fix hybrid format: if message has "vs" AND semicolons, remove extra semicolons
+  // This handles messages like: "Team A vs. Team B; map; date; time"
+  // The semicolon splitter in splitVsSides() should only be used for "Team A; Team B" format (no "vs")
+  // Note: Use [\s\S] to match across newlines since raw Discord messages may contain line breaks
+  if (/\bvs\.?\b/i.test(cleaned)) {
+    // Message has "vs" - replace semicolons with spaces to prevent incorrect splitting
+    // Preserve the first semicolon before "vs" (if any), but replace others after "vs"
+    // Use [\s\S]* instead of .* to match across newlines
+    var vsMatch = cleaned.match(/^([\s\S]*?)\bvs\.?\b([\s\S]*)$/i);
+    if (vsMatch) {
+      var beforeVs = vsMatch[1];
+      var afterVs = vsMatch[2];
+      // Replace semicolons in the "after vs" portion with spaces
+      afterVs = afterVs.replace(/;/g, ' ');
+      cleaned = beforeVs + 'vs' + afterVs;
+    }
+  }
+
+  return cleaned;
 }
 
 /**
@@ -421,8 +505,11 @@ function parseWhenFlexible(s, hintDiv, hintMap, referenceDate) {
   var lower = s.toLowerCase();
   var refDate = referenceDate || new Date();
 
-  // Known “TBD/postponed”
-  if (/\b(tbd|to be determined|postponed|next week|time tbd)\b/.test(lower)) {
+  // Known "TBD/postponed" - distinguish between TBD and POSTPONED
+  if (/\b(postponed|delayed|postpone|delay)\b/.test(lower)) {
+    return { whenText: 'POSTPONED' };
+  }
+  if (/\b(tbd|to be determined|next week|time tbd)\b/.test(lower)) {
     return { whenText: 'TBD' };
   }
 
@@ -1443,6 +1530,21 @@ function parseScheduleMessage_v3(text, messageDate, messageObj) {
 
     // which block/week?
     var week = chooseWeekForPair(division, matchA.name, matchB.name, weekList, hintMap, raw, when, messageDate);
+
+    // For POSTPONED matches, be more lenient - try to find ANY week with this matchup
+    if ((!week || !week.date) && when && when.whenText === 'POSTPONED') {
+      // Try to find ANY week that has this matchup (past or future)
+      if (Array.isArray(weekList)) {
+        var anyWeek = weekList.find(function(w) {
+          return w.division === division && hasTeamsInWeek(w, matchA.name, matchB.name);
+        });
+        if (anyWeek) {
+          week = anyWeek;
+          trace.push('postponed_fallback=found_any_week');
+        }
+      }
+    }
+
     if (!week || !week.date) {
       return { ok: false, error: 'week_not_found', trace: trace };
     }

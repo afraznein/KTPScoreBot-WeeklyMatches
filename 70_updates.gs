@@ -188,14 +188,21 @@ function updateTablesMessageFromPairs(weekKey, pairs, options) {
     }
 
     // NEW: Skip if already scheduled (when skipScheduled option is enabled)
+    // Exception: Allow rescheduling of POSTPONED matches (they need a real time)
     if (options.skipScheduled) {
       var existingSchedule = store.sched && store.sched[div] && store.sched[div][rowIndex];
       if (existingSchedule && existingSchedule.whenText) {
-        skipped++;
-        if (typeof sendLog === 'function') {
-          sendLog(`⏭️ Skipping already-scheduled: ${div} • ${home} vs ${away} • "${existingSchedule.whenText}"`);
+        // Don't skip if existing schedule is POSTPONED or TBD - these need actual times
+        var isPlaceholder = existingSchedule.whenText === 'POSTPONED' || existingSchedule.whenText === 'TBD';
+        if (!isPlaceholder) {
+          skipped++;
+          if (typeof sendLog === 'function') {
+            sendLog(`⏭️ Skipping already-scheduled: ${div} • ${home} vs ${away} • "${existingSchedule.whenText}"`);
+          }
+          continue;
+        } else if (typeof sendLog === 'function') {
+          sendLog(`🔄 Allowing reschedule of ${existingSchedule.whenText} match: ${div} • ${home} vs ${away}`);
         }
-        continue;
       }
     }
 

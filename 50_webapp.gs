@@ -653,6 +653,83 @@ function server_probeRelayRoutes(secret) {
 }
 
 /**
+ * Clear all scheduled matches from the store.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {cleared: number}} or {ok: false, error}
+ */
+function server_clearAllScheduled(secret) {
+  try {
+    checkSecret(secret);
+    var count = (typeof clearAllScheduledMatches === 'function') ? clearAllScheduledMatches() : 0;
+    return ok({ cleared: count });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Get automatic polling status.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {enabled: boolean, triggers: [], count: number}}
+ */
+function server_getPollingStatus(secret) {
+  try {
+    checkSecret(secret);
+    var triggers = ScriptApp.getProjectTriggers();
+    var pollingTriggers = [];
+
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'automaticPollingHandler') {
+        pollingTriggers.push({
+          id: triggers[i].getUniqueId(),
+          handler: triggers[i].getHandlerFunction()
+        });
+      }
+    }
+
+    return ok({
+      enabled: pollingTriggers.length > 0,
+      triggers: pollingTriggers,
+      count: pollingTriggers.length
+    });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Enable automatic polling with specified interval.
+ * @param {string} secret - Authentication secret
+ * @param {number} intervalMinutes - Interval in minutes (default: 5)
+ * @returns {Object} {ok: true, data: {triggerId: string, interval: number}}
+ */
+function server_enablePolling(secret, intervalMinutes) {
+  try {
+    checkSecret(secret);
+    var interval = intervalMinutes || 5;
+    var triggerId = (typeof setupAutomaticPolling === 'function') ? setupAutomaticPolling(interval) : '';
+    return ok({ triggerId: triggerId, interval: interval });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Disable automatic polling.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {removed: number}}
+ */
+function server_disablePolling(secret) {
+  try {
+    checkSecret(secret);
+    var count = (typeof removeAutomaticPolling === 'function') ? removeAutomaticPolling() : 0;
+    return ok({ removed: count });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
  * Back-process a match without requiring a map hint.
  *
  * @param {string} secret - Authentication secret

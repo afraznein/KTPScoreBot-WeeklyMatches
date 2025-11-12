@@ -13,8 +13,11 @@
 // - loadMsgIds(wk)
 // - saveMsgIds(wk, ids)
 // - clearMsgIds(wk)
+// - clearAllScheduledMatches()
+// - setupAutomaticPolling(intervalMinutes)
+// - removeAutomaticPolling()
 //
-// Total: 7 functions
+// Total: 10 functions
 // =======================
 
 /** Internal helper to form the script property key for weekly store. */
@@ -115,4 +118,117 @@ function saveMsgIds(wk, ids) {
  */
 function clearMsgIds(wk) {
   PropertiesService.getScriptProperties().deleteProperty(msgIdsKey(wk));
+}
+
+/**
+ * Clear all scheduled matches from ALL week stores.
+ * This removes the store.sched property from every WEEKLY_STORE_* entry.
+ * Use this to reset the "already scheduled" tracking and allow re-scheduling of all matches.
+ * @returns {number} Number of week stores cleared
+ */
+function clearAllScheduledMatches() {
+  var sp = PropertiesService.getScriptProperties();
+  var allProps = sp.getProperties();
+  var cleared = 0;
+
+  for (var key in allProps) {
+    if (key.startsWith('WEEKLY_STORE_')) {
+      try {
+        var store = JSON.parse(allProps[key]);
+        if (store && store.sched) {
+          // Clear the sched property but keep other data (shoutcasters, etc.)
+          delete store.sched;
+          sp.setProperty(key, JSON.stringify(store));
+          cleared++;
+        }
+      } catch (e) {
+        // Skip malformed stores
+        Logger.log('Skipped malformed store: ' + key);
+      }
+    }
+  }
+
+  if (typeof sendLog === 'function') {
+    sendLog('🗑️ Cleared scheduled matches from ' + cleared + ' week stores');
+  }
+
+  return cleared;
+}
+
+/**
+ * Set up automatic polling with a time-based trigger.
+ * Creates a trigger that calls server_startPolling() at regular intervals.
+ * @param {number} [intervalMinutes=5] - Interval in minutes (default: 5)
+ * @returns {string} Trigger ID
+ */
+function setupAutomaticPolling(intervalMinutes) {
+  intervalMinutes = intervalMinutes || 5;
+
+  // Remove any existing automatic polling triggers first
+  removeAutomaticPolling();
+
+  // Create new trigger
+  var trigger = ScriptApp.newTrigger('automaticPollingHandler')
+    .timeBased()
+    .everyMinutes(intervalMinutes)
+    .create();
+
+  if (typeof sendLog === 'function') {
+    sendLog('✅ Automatic polling enabled (every ' + intervalMinutes + ' minutes). Trigger ID: ' + trigger.getUniqueId());
+  }
+
+  return trigger.getUniqueId();
+}
+
+/**
+ * Remove all automatic polling triggers.
+ * @returns {number} Number of triggers removed
+ */
+function removeAutomaticPolling() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'automaticPollingHandler') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+
+  if (removed > 0 && typeof sendLog === 'function') {
+    sendLog('🛑 Removed ' + removed + ' automatic polling trigger(s)');
+  }
+
+  return removed;
+}
+
+/**
+ * Handler function called by the time-based trigger.
+ * This is the function that actually runs automatically.
+ * It calls server_startPolling() without the skipScheduled option (allows re-scheduling).
+ */
+function automaticPollingHandler() {
+  try {
+    // Get the secret from script properties
+    var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
+    if (!secret) {
+      Logger.log('ERROR: WEBAPP_SECRET not set in script properties');
+      return;
+    }
+
+    // Call server_startPolling (which polls from last pointer, no skipScheduled = allows re-scheduling)
+    var result = server_startPolling(secret);
+
+    if (result.ok) {
+      var data = result.data || {};
+      Logger.log('✅ Automatic poll completed: ' +
+        'Processed: ' + (data.processed || 0) + ', ' +
+        'Updated: ' + (data.updatedPairs || data.updated || 0) + ', ' +
+        'Errors: ' + (Array.isArray(data.errors) ? data.errors.length : 0));
+    } else {
+      Logger.log('❌ Automatic poll failed: ' + (result.error || 'Unknown error'));
+    }
+  } catch (e) {
+    Logger.log('❌ Automatic polling error: ' + (e.message || e));
+  }
 }
