@@ -17,16 +17,31 @@
 //
 // =======================
 
-const VERSION = '4.0.0';
+const VERSION = '4.0.2';
 const VERSION_DATE = '2025-11-12';
 
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 4.0.0
+ * Version: 4.0.2
  * Last Updated: 2025-11-12
  *
  * CHANGELOG:
+ * v4.0.2 (2025-11-12) - UX: Consolidated polling interface improvements
+ *                      - CHANGED: Polling section now matches Historical Parsing layout
+ *                      - NEW: Discord message link for last processed polling ID
+ *                      - NEW: "Continue from Last" and "Parse from Specific ID" buttons for polling
+ *                      - REMOVED: Separate "Set Start ID" and "Clear Start ID" buttons (redundant)
+ *                      - FIXED: Removed emoji characters causing syntax errors in older browsers
+ *                      - Note: Polling always processes current week with no skip logic
+ * v4.0.1 (2025-11-12) - FEATURE: Web UI for channel configuration management
+ *                      - NEW: server_getChannelIds(secret) - Get current channel IDs from Script Properties
+ *                      - NEW: server_setChannelIds(secret, channels) - Update channel IDs via web
+ *                      - NEW: Control panel section "📡 Channel Configuration" for managing Discord channel IDs
+ *                      - Location: 50_webapp.gs (lines 655-722), ktp_control_panel.html (lines 261-288, 868-944)
+ *                      - UI Features: Load/save channel IDs, validation, confirmation dialogs
+ *                      - Impact: Fixes issue where Script Properties couldn't be modified in Apps Script editor
+ *                      - Solves: Posting to wrong channel when Script Properties override config constants
  * v4.0.0 (2025-11-12) - Alpha Release
  *                      - FEATURE: Web UI for automatic polling management
  *                      - NEW: server_clearAllScheduled() - Web endpoint to clear all scheduled matches

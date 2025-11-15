@@ -48,9 +48,17 @@
     }
 
     .wrap {
-      max-width: 1080px;
+      max-width: 1050px;
       margin: 0 auto;
       padding: 16px 20px 120px;
+      padding-right: 340px; /* Make room for debug dock */
+    }
+
+    @media (min-width: 1800px) {
+      .wrap {
+        margin-left: calc(50% - 685px); /* Center accounting for debug dock */
+        margin-right: auto;
+      }
     }
 
     .grid {
@@ -165,7 +173,7 @@
       right: 16px;
       top: 16px;
       bottom: 16px;
-      width: 420px;
+      width: 320px;
       background: var(--panel);
       border: 1px solid #374151;
       border-radius: 10px;
@@ -258,30 +266,67 @@
         </div>
       </div>
 
-      <!-- Polling -->
-      <div class="card" style="grid-column: span 12;">
-        <h2>Polling</h2>
-        <div class="row">
-          <label for="startId">Start Message ID</label>
-          <input id="startId" type="text" placeholder="e.g. 1423841447026622534" />
+      <!-- Channel Configuration -->
+      <div class="card" style="grid-column: span 12; border: 2px solid var(--warn);">
+        <h2>📡 Channel Configuration</h2>
+        <div class="footer-note" style="margin-top: 0; margin-bottom: 10px;">
+          <strong>Discord Channel IDs:</strong> These Script Properties override the values in 00_config.gs. Update them here to change where the bot posts.
         </div>
         <div class="row">
-          <button id="btnSet" class="btn">Set Start ID</button>
-          <button id="btnClear" class="btn warn">Clear Start ID</button>
-          <button id="btnStart" class="btn ok">Start Polling (from ID, inclusive)</button>
-          <button id="btnStartPointer" class="btn">Start (from last pointer)</button>
+          <button id="btnLoadChannels" class="btn">🔄 Load Current Channel IDs</button>
+        </div>
+        <div class="row">
+          <label for="schedChannelId">Schedule Input Channel</label>
+          <input id="schedChannelId" type="text" placeholder="e.g. 1234567890123456789" style="flex: 1;" />
+          <span style="font-size: 11px; color: var(--muted); margin-left: 8px;">Where captains post schedules</span>
+        </div>
+        <div class="row">
+          <label for="weeklyChannelId">Weekly Post Channel</label>
+          <input id="weeklyChannelId" type="text" placeholder="e.g. 1081260197340794920" style="flex: 1;" />
+          <span style="font-size: 11px; color: var(--muted); margin-left: 8px;">Where weekly tables are posted</span>
+        </div>
+        <div class="row">
+          <label for="resultsChannelId">Results Log Channel</label>
+          <input id="resultsChannelId" type="text" placeholder="e.g. 1234567890123456789" style="flex: 1;" />
+          <span style="font-size: 11px; color: var(--muted); margin-left: 8px;">Where results are logged</span>
+        </div>
+        <div class="row">
+          <button id="btnSaveChannels" class="btn ok">💾 Save Channel IDs</button>
         </div>
       </div>
 
-      <!-- Historical Parsing (Primary Parser) -->
+      <!-- Polling (Current Week Updates) -->
+      <div class="card" style="grid-column: span 12;">
+        <h2><img src="https://cdn.discordapp.com/emojis/1002382703020212245.png" width="18" height="18" style="vertical-align: middle; margin-right: 6px;" alt="KTP"> Polling (Current Week Updates)</h2>
+        <div class="footer-note" style="margin-top: 0; margin-bottom: 10px;">
+          <strong>Current week only:</strong> Updates the current/upcoming week table with new schedules. All messages are processed fresh (no skip logic).
+        </div>
+        <div class="row">
+          <label>Last Processed ID</label>
+          <span id="lastPollMsgId" style="font-family: monospace; color: #666;">Loading...</span>
+          <a id="linkLastPollMsg" href="#" target="_blank" style="margin-left: 8px; font-size: 11px; display: none;">View in Discord</a>
+          <button id="btnCopyLastPollId" class="btn" style="margin-left: 8px; font-size: 11px; padding: 4px 8px;">Copy ID</button>
+        </div>
+        <div class="row">
+          <label for="pollStartId">Start Message ID (optional)</label>
+          <input id="pollStartId" type="text" placeholder="Leave empty to continue from last" />
+        </div>
+        <div class="row">
+          <button id="btnPollContinue" class="btn ok" style="font-weight: 600;">Continue from Last</button>
+          <button id="btnPollFromId" class="btn">Parse from Specific ID</button>
+        </div>
+      </div>
+
+      <!-- Historical Parsing -->
       <div class="card" style="grid-column: span 12; border: 2px solid var(--ok);">
-        <h2>🔄 Historical Parsing (Primary Parser)</h2>
+        <h2>🔄 Historical Parsing</h2>
         <div class="footer-note" style="margin-top: 0; margin-bottom: 10px;">
           <strong>Recommended for catching up:</strong> Bulk re-parse old Discord messages from captains. Uses message timestamps to match schedules to historical weeks. Useful for back-filling schedules from earlier in the season.
         </div>
         <div class="row">
           <label>Last Processed ID</label>
           <span id="lastHistMsgId" style="font-family: monospace; color: #666;">Loading...</span>
+          <a id="linkLastMsg" href="#" target="_blank" style="margin-left: 8px; font-size: 11px; display: none;">🔗 View in Discord</a>
           <button id="btnCopyLastId" class="btn" style="margin-left: 8px; font-size: 11px; padding: 4px 8px;">Copy ID</button>
         </div>
         <div class="row">
@@ -336,7 +381,7 @@
       </div>
 
       <!-- Clear Week-Specific IDs -->
-      <div class="card" style="grid-column: span 6;">
+      <div class="card" style="grid-column: span 12;">
         <h2>🗑️ Clear Week-Specific Message IDs</h2>
         <div class="footer-note">
           Clear stored Discord message IDs for specific weeks (useful when messages were manually deleted).
@@ -473,56 +518,118 @@
     .server_probeRelay(secret);
   };
 
-    // Set Start ID
-    $('btnSet').onclick = () => {
-      const secret = sanitizeSecretFieldValue($('secret').value);
-      const id = $('startId').value.trim();
-      if (!secret) { out('missing secret','err'); return; }
-      if (!/^\d{5,30}$/.test(id)) { out('invalid message id','err'); return; }
-      setBusy(true, 'Setting start id…'); out('▶ Set Start ID…');
+    // ========== Polling (Current Week) ==========
+
+    // Load last polling message ID (shared with historical parsing)
+    function loadLastPollingId() {
       google.script.run.withSuccessHandler(res => {
-        out(res.ok ? ('✅ set: ' + JSON.stringify(res.data)) : ('❌ ' + res.error), res.ok ? 'ok':'err');
-        setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_setStartId(secret, id);
+        if (res && res.ok && res.data) {
+          const lastId = res.data.lastStartId || 'None';
+          const schedChannelId = res.data.schedChannel || '';
+
+          $('lastPollMsgId').textContent = lastId;
+          $('lastPollMsgId').style.color = lastId === 'None' ? '#999' : '#2ecc71';
+
+          // Build Discord message link
+          if (lastId !== 'None' && schedChannelId && /^\d{17,20}$/.test(lastId)) {
+            const guildId = '996884268804493363';
+            const discordUrl = 'https://discord.com/channels/' + guildId + '/' + schedChannelId + '/' + lastId;
+            $('linkLastPollMsg').href = discordUrl;
+            $('linkLastPollMsg').style.display = 'inline';
+          } else {
+            $('linkLastPollMsg').style.display = 'none';
+          }
+        }
+      }).withFailureHandler(e => {
+        $('lastPollMsgId').textContent = 'Error loading';
+        $('lastPollMsgId').style.color = '#e74c3c';
+        $('linkLastPollMsg').style.display = 'none';
+      }).server_getState();
+    }
+
+    // Copy polling ID button
+    $('btnCopyLastPollId').onclick = async () => {
+      const lastId = $('lastPollMsgId').textContent;
+      if (lastId === 'None' || lastId === 'Loading...' || lastId === 'Error loading') {
+        out('No valid ID to copy', 'err');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(lastId);
+        out('Copied ID: ' + lastId, 'ok');
+      } catch (e) {
+        out('Failed to copy to clipboard', 'err');
+      }
     };
 
-    // Clear Start ID
-    $('btnClear').onclick = () => {
+    // Continue from last pointer (current week only, no skip)
+    $('btnPollContinue').onclick = () => {
       const secret = sanitizeSecretFieldValue($('secret').value);
       if (!secret) { out('missing secret','err'); return; }
-      setBusy(true, 'Clearing start id…'); out('▶ Clear Start ID…');
-      google.script.run.withSuccessHandler(res => {
-        out(res.ok ? '✅ cleared' : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
-        setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_clearStartId(secret);
+
+      setBusy(true, 'Loading last pointer...');
+      google.script.run.withSuccessHandler(stateRes => {
+        if (!stateRes || !stateRes.ok || !stateRes.data || !stateRes.data.lastStartId) {
+          out('No last pointer found. Use "Parse from Specific ID" first.', 'err');
+          setBusy(false);
+          return;
+        }
+
+        const lastId = stateRes.data.lastStartId;
+        out('Continue polling after ' + lastId + ' (current week, no skip)...');
+
+        google.script.run.withSuccessHandler(res => {
+          if (res.ok) {
+            const d = res.data;
+            out('Polling Complete:\n' +
+              '  Processed: ' + (d.processed || 0) + ' messages\n' +
+              '  Updated: ' + (d.updated || 0) + ' schedules\n' +
+              '  Errors: ' + (d.errors || 0) + '\n' +
+              '  Last ID: ' + (d.lastPointer || 'unknown') + '\n' +
+              '  Time: ' + (d.tookMs || 0) + 'ms', 'ok');
+            loadLastPollingId(); // Refresh
+          } else {
+            out('Error: ' + res.error, 'err');
+          }
+          setBusy(false);
+        }).withFailureHandler(e => { out('Script error: ' + e.message, 'err'); setBusy(false); })
+        .server_startPolling(secret);  // Uses current week, no skip
+
+      }).withFailureHandler(e => { out('Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_getState();
     };
 
-    // Start Polling (inclusive)
-    $('btnStart').onclick = () => {
+    // Parse from specific ID (current week only, no skip)
+    $('btnPollFromId').onclick = () => {
       const secret = sanitizeSecretFieldValue($('secret').value);
-      const id = $('startId').value.trim();
-      if (!secret) { out('missing secret','err'); return; }
-      if (!/^\d{5,30}$/.test(id)) { out('invalid message id','err'); return; }
-      setBusy(true, 'Polling from ID (inclusive)…'); out('▶ Start Polling from ID (inclusive)…');
-      google.script.run.withSuccessHandler(res => {
-        out(res.ok ? ('✅ ' + JSON.stringify(res.data)) : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
-        setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_startPollingFrom(secret, id);
-    };
+      const id = $('pollStartId').value.trim();
+      if (!secret) { out('Missing secret','err'); return; }
+      if (!id) {
+        out('Please enter a message ID or use "Continue from Last" button','err');
+        return;
+      }
+      if (!/^\d{5,30}$/.test(id)) { out('Invalid message ID format','err'); return; }
 
-    // Start Polling (from last pointer)
-    $('btnStartPointer').onclick = () => {
-      const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('missing secret','err'); return; }
-      setBusy(true, 'Polling from last pointer…'); out('▶ Start Polling from last pointer…');
+      setBusy(true, 'Polling from specific ID...');
+      out('Parse from ' + id + ' (current week, no skip)...');
+
       google.script.run.withSuccessHandler(res => {
-        out(res.ok ? ('✅ ' + JSON.stringify(res.data)) : ('❌ ' + res.error), res.ok ? 'ok' : 'err');
+        if (res.ok) {
+          const d = res.data;
+          out('Polling Complete:\n' +
+            '  Processed: ' + (d.processed || 0) + ' messages\n' +
+            '  Updated: ' + (d.updated || 0) + ' schedules\n' +
+            '  Errors: ' + (d.errors || 0) + '\n' +
+            '  Last ID: ' + (d.lastPointer || 'unknown') + '\n' +
+            '  Time: ' + (d.tookMs || 0) + 'ms', 'ok');
+          loadLastPollingId(); // Refresh
+          $('pollStartId').value = ''; // Clear input
+        } else {
+          out('Error: ' + res.error, 'err');
+        }
         setBusy(false);
-      }).withFailureHandler(e => { out('script error: ' + e.message, 'err'); setBusy(false); })
-      .server_startPolling(secret);
+      }).withFailureHandler(e => { out('Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_startPollingFrom(secret, id, false, true);  // skipScheduled=false, inclusive=true
     };
 
     // Load version badge
@@ -543,12 +650,28 @@
       google.script.run.withSuccessHandler(res => {
         if (res && res.ok && res.data) {
           const lastId = res.data.lastStartId || 'None';
+          const schedChannelId = res.data.schedChannel || '';
+
           $('lastHistMsgId').textContent = lastId;
           $('lastHistMsgId').style.color = lastId === 'None' ? '#999' : '#2ecc71';
+
+          // Build Discord message link if we have both IDs
+          if (lastId !== 'None' && schedChannelId && /^\d{17,20}$/.test(lastId)) {
+            // Discord message URL format: https://discord.com/channels/{guild}/{channel}/{message}
+            // Using KTP guild ID: 996884268804493363
+            const guildId = '996884268804493363';
+            const discordUrl = 'https://discord.com/channels/' + guildId + '/' + schedChannelId + '/' + lastId;
+
+            $('linkLastMsg').href = discordUrl;
+            $('linkLastMsg').style.display = 'inline';
+          } else {
+            $('linkLastMsg').style.display = 'none';
+          }
         }
       }).withFailureHandler(e => {
         $('lastHistMsgId').textContent = 'Error loading';
         $('lastHistMsgId').style.color = '#e74c3c';
+        $('linkLastMsg').style.display = 'none';
       }).server_getState();
     }
 
@@ -598,6 +721,7 @@
     // Load on page load
     loadVersionBadge();
     loadLastMessageId();
+    loadLastPollingId();
     loadDebugStatus();
 
     // Copy Last ID button
@@ -836,6 +960,84 @@
     };
     $('dbgClear').onclick = () => { $('debugOut').textContent = ''; };
 
+    // ========== Channel Configuration ==========
+
+    // Load current channel IDs
+    $('btnLoadChannels').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('❌ Missing secret','err'); return; }
+
+      setBusy(true, 'Loading channel IDs...');
+      out('▶ Loading channel IDs...');
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok && res.data) {
+          $('schedChannelId').value = res.data.schedChannel || '';
+          $('weeklyChannelId').value = res.data.weeklyChannel || '';
+          $('resultsChannelId').value = res.data.resultsChannel || '';
+          out('✅ Channel IDs loaded:\n' +
+            '  Schedule Input: ' + (res.data.schedChannel || '(not set)') + '\n' +
+            '  Weekly Post: ' + (res.data.weeklyChannel || '(not set)') + '\n' +
+            '  Results Log: ' + (res.data.resultsChannel || '(not set)'), 'ok');
+        } else {
+          out('❌ ' + (res && res.error), 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_getChannelIds(secret);
+    };
+
+    // Save channel IDs
+    $('btnSaveChannels').onclick = () => {
+      const secret = sanitizeSecretFieldValue($('secret').value);
+      if (!secret) { out('❌ Missing secret','err'); return; }
+
+      const schedId = $('schedChannelId').value.trim();
+      const weeklyId = $('weeklyChannelId').value.trim();
+      const resultsId = $('resultsChannelId').value.trim();
+
+      // Validate IDs
+      const validate = (id, name) => {
+        if (id && !/^\d{17,20}$/.test(id)) {
+          out('❌ Invalid ' + name + ' ID format (must be 17-20 digits)', 'err');
+          return false;
+        }
+        return true;
+      };
+
+      if (!validate(schedId, 'Schedule Input Channel')) return;
+      if (!validate(weeklyId, 'Weekly Post Channel')) return;
+      if (!validate(resultsId, 'Results Log Channel')) return;
+
+      if (!confirm('Save Channel IDs?\n\n' +
+        'Schedule Input: ' + (schedId || '(empty)') + '\n' +
+        'Weekly Post: ' + (weeklyId || '(empty)') + '\n' +
+        'Results Log: ' + (resultsId || '(empty)') + '\n\n' +
+        'This will update Script Properties immediately.')) {
+        out('❌ Save cancelled', 'err');
+        return;
+      }
+
+      setBusy(true, 'Saving channel IDs...');
+      out('▶ Saving channel IDs...');
+
+      const channels = {
+        schedChannel: schedId,
+        weeklyChannel: weeklyId,
+        resultsChannel: resultsId
+      };
+
+      google.script.run.withSuccessHandler(res => {
+        if (res && res.ok) {
+          out('✅ Channel IDs saved:\n  Updated: ' + res.data.updated.join(', '), 'ok');
+        } else {
+          out('❌ ' + (res && res.error), 'err');
+        }
+        setBusy(false);
+      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      .server_setChannelIds(secret, channels);
+    };
+
     // ========== Automatic Polling Management ==========
 
     // Load polling status on page load and update UI
@@ -853,20 +1055,20 @@
           const count = res.data.count || 0;
 
           if (enabled) {
-            $('pollingStatus').textContent = `🟢 Enabled (${count} trigger${count !== 1 ? 's' : ''})`;
+            $('pollingStatus').textContent = 'Enabled (' + count + ' trigger' + (count !== 1 ? 's' : '') + ')';
             $('pollingStatus').style.color = 'var(--ok)';
             $('pollingStatus').style.borderColor = 'var(--ok)';
           } else {
-            $('pollingStatus').textContent = '⚪ Disabled';
+            $('pollingStatus').textContent = 'Disabled';
             $('pollingStatus').style.color = 'var(--muted)';
             $('pollingStatus').style.borderColor = '#374151';
           }
         } else {
-          $('pollingStatus').textContent = '❌ Error';
+          $('pollingStatus').textContent = 'Error';
           $('pollingStatus').style.color = 'var(--err)';
         }
       }).withFailureHandler(e => {
-        $('pollingStatus').textContent = '❌ Error: ' + e.message;
+        $('pollingStatus').textContent = 'Error: ' + e.message;
         $('pollingStatus').style.color = 'var(--err)';
       }).server_getPollingStatus(secret);
     }
@@ -888,72 +1090,72 @@
         return;
       }
 
-      if (!confirm(`✅ Enable automatic polling?\n\n• Interval: Every ${interval} minute${interval !== 1 ? 's' : ''}\n• Behavior: Polls from last pointer, allows re-scheduling\n\nThis will create a time-based trigger that runs automatically.`)) {
+      if (!confirm('✅ Enable automatic polling?\n\nInterval: Every ' + interval + ' minute' + (interval !== 1 ? 's' : '') + '\nBehavior: Polls from last pointer, allows re-scheduling\n\nThis will create a time-based trigger that runs automatically.')) {
         out('❌ Enable cancelled', 'err');
         return;
       }
 
       setBusy(true, 'Enabling polling...');
-      out(`▶ Enabling automatic polling (${interval} minute interval)...`);
+      out('Enabling automatic polling (' + interval + ' minute interval)...');
 
       google.script.run.withSuccessHandler(res => {
         if (res && res.ok) {
-          out(`✅ Automatic polling enabled:\n  Trigger ID: ${res.data.triggerId}\n  Interval: ${res.data.interval} minutes`, 'ok');
+          out('Automatic polling enabled:\n  Trigger ID: ' + res.data.triggerId + '\n  Interval: ' + res.data.interval + ' minutes', 'ok');
           loadPollingStatus(); // Refresh status
         } else {
-          out('❌ ' + (res && res.error), 'err');
+          out('Error: ' + (res && res.error), 'err');
         }
         setBusy(false);
-      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      }).withFailureHandler(e => { out('Script error: ' + e.message, 'err'); setBusy(false); })
       .server_enablePolling(secret, interval);
     };
 
     // Disable automatic polling
     $('btnDisablePolling').onclick = () => {
       const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('❌ Missing secret','err'); return; }
+      if (!secret) { out('Missing secret','err'); return; }
 
-      if (!confirm('⛔ Disable automatic polling?\n\nThis will remove all automatic polling triggers. You can re-enable it anytime.')) {
-        out('❌ Disable cancelled', 'err');
+      if (!confirm('Disable automatic polling?\n\nThis will remove all automatic polling triggers. You can re-enable it anytime.')) {
+        out('Disable cancelled', 'err');
         return;
       }
 
       setBusy(true, 'Disabling polling...');
-      out('▶ Disabling automatic polling...');
+      out('Disabling automatic polling...');
 
       google.script.run.withSuccessHandler(res => {
         if (res && res.ok) {
-          out(`✅ Automatic polling disabled:\n  Triggers removed: ${res.data.removed}`, 'ok');
+          out('Automatic polling disabled:\n  Triggers removed: ' + res.data.removed, 'ok');
           loadPollingStatus(); // Refresh status
         } else {
-          out('❌ ' + (res && res.error), 'err');
+          out('Error: ' + (res && res.error), 'err');
         }
         setBusy(false);
-      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      }).withFailureHandler(e => { out('Script error: ' + e.message, 'err'); setBusy(false); })
       .server_disablePolling(secret);
     };
 
     // Clear all scheduled matches
     $('btnClearScheduled').onclick = () => {
       const secret = sanitizeSecretFieldValue($('secret').value);
-      if (!secret) { out('❌ Missing secret','err'); return; }
+      if (!secret) { out('Missing secret','err'); return; }
 
-      if (!confirm('🗑️ Clear all scheduled matches from the store?\n\nThis will:\n• Remove all stored schedule data from ALL weeks\n• Keep other data (shoutcasters, etc.) intact\n• Allow re-scheduling of all matches\n\nUseful before enabling automatic polling to ensure all matches get fresh schedules.')) {
-        out('❌ Clear cancelled', 'err');
+      if (!confirm('Clear all scheduled matches from the store?\n\nThis will:\n- Remove all stored schedule data from ALL weeks\n- Keep other data (shoutcasters, etc.) intact\n- Allow re-scheduling of all matches\n\nUseful before enabling automatic polling to ensure all matches get fresh schedules.')) {
+        out('Clear cancelled', 'err');
         return;
       }
 
       setBusy(true, 'Clearing schedules...');
-      out('▶ Clearing all scheduled matches...');
+      out('Clearing all scheduled matches...');
 
       google.script.run.withSuccessHandler(res => {
         if (res && res.ok) {
-          out(`✅ Cleared schedules from ${res.data.cleared} week store(s)`, 'ok');
+          out('Cleared schedules from ' + res.data.cleared + ' week store(s)', 'ok');
         } else {
-          out('❌ ' + (res && res.error), 'err');
+          out('Error: ' + (res && res.error), 'err');
         }
         setBusy(false);
-      }).withFailureHandler(e => { out('❌ Script error: ' + e.message, 'err'); setBusy(false); })
+      }).withFailureHandler(e => { out('Script error: ' + e.message, 'err'); setBusy(false); })
       .server_clearAllScheduled(secret);
     };
 

@@ -653,6 +653,75 @@ function server_probeRelayRoutes(secret) {
 }
 
 /**
+ * Get all channel ID configuration values.
+ * @param {string} secret - Authentication secret
+ * @returns {Object} {ok: true, data: {schedChannel, weeklyChannel, resultsChannel}}
+ */
+function server_getChannelIds(secret) {
+  try {
+    checkSecret(secret);
+    var sp = PropertiesService.getScriptProperties();
+    return ok({
+      schedChannel: sp.getProperty('SCHED_INPUT_CHANNEL_ID') || '',
+      weeklyChannel: sp.getProperty('WEEKLY_POST_CHANNEL_ID') || '',
+      resultsChannel: sp.getProperty('RESULTS_LOG_CHANNEL_ID') || ''
+    });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
+ * Update channel ID configuration values.
+ * @param {string} secret - Authentication secret
+ * @param {Object} channels - Object with schedChannel, weeklyChannel, resultsChannel
+ * @returns {Object} {ok: true, data: {updated: []}} or {ok: false, error}
+ */
+function server_setChannelIds(secret, channels) {
+  try {
+    checkSecret(secret);
+    if (!channels || typeof channels !== 'object') {
+      throw new Error('channels parameter must be an object');
+    }
+
+    var sp = PropertiesService.getScriptProperties();
+    var updated = [];
+
+    // Validate and update each channel ID
+    if (channels.schedChannel !== undefined) {
+      var schedId = String(channels.schedChannel || '').trim();
+      if (schedId && !/^\d{17,20}$/.test(schedId)) {
+        throw new Error('Invalid schedChannel ID format');
+      }
+      sp.setProperty('SCHED_INPUT_CHANNEL_ID', schedId);
+      updated.push('SCHED_INPUT_CHANNEL_ID');
+    }
+
+    if (channels.weeklyChannel !== undefined) {
+      var weeklyId = String(channels.weeklyChannel || '').trim();
+      if (weeklyId && !/^\d{17,20}$/.test(weeklyId)) {
+        throw new Error('Invalid weeklyChannel ID format');
+      }
+      sp.setProperty('WEEKLY_POST_CHANNEL_ID', weeklyId);
+      updated.push('WEEKLY_POST_CHANNEL_ID');
+    }
+
+    if (channels.resultsChannel !== undefined) {
+      var resultsId = String(channels.resultsChannel || '').trim();
+      if (resultsId && !/^\d{17,20}$/.test(resultsId)) {
+        throw new Error('Invalid resultsChannel ID format');
+      }
+      sp.setProperty('RESULTS_LOG_CHANNEL_ID', resultsId);
+      updated.push('RESULTS_LOG_CHANNEL_ID');
+    }
+
+    return ok({ updated: updated });
+  } catch (e) {
+    return error(e);
+  }
+}
+
+/**
  * Clear all scheduled matches from the store.
  * @param {string} secret - Authentication secret
  * @returns {Object} {ok: true, data: {cleared: number}} or {ok: false, error}
