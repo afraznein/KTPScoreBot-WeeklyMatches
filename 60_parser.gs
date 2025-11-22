@@ -1157,58 +1157,61 @@ function pollAndProcessFromId(channelId, startId, opt) {
   // Enhanced logging with stats
   logParsingSummary(successCount, tentativeCount, opt.channelName || 'match-alerts');
 
-  // NEW: Send batched confirmation summary to Discord (before time runs out)
-  if (confirmations.length > 0) {
-    // Build compact summary message
-    var summaryHeader = confirmations.length === 1
-      ? '✅ Scheduled 1 match:'
-      : `✅ Scheduled ${confirmations.length} matches:`;
+  // NEW: Only send Discord reports if we actually processed messages
+  if (processed > 0) {
+    // NEW: Send batched confirmation summary to Discord (before time runs out)
+    if (confirmations.length > 0) {
+      // Build compact summary message
+      var summaryHeader = confirmations.length === 1
+        ? '✅ Scheduled 1 match:'
+        : `✅ Scheduled ${confirmations.length} matches:`;
 
-    // Extract just the essential info from each confirmation (keep author and link)
-    var summaryLines = confirmations.map(function(conf) {
-      // Extract everything after the first emoji/season info
-      // Format: ":white_check_mark: KTP Season 8 :KTP: Gold • `map` • TEAM1 vs TEAM2 • time • Scheduled by @user • [Jump to message](...)"
-      // We want: "• Gold • `map` • TEAM1 vs TEAM2 • time • Scheduled by @user • [Jump to message](...)"
+      // Extract just the essential info from each confirmation (keep author and link)
+      var summaryLines = confirmations.map(function(conf) {
+        // Extract everything after the first emoji/season info
+        // Format: ":white_check_mark: KTP Season 8 :KTP: Gold • `map` • TEAM1 vs TEAM2 • time • Scheduled by @user • [Jump to message](...)"
+        // We want: "• Gold • `map` • TEAM1 vs TEAM2 • time • Scheduled by @user • [Jump to message](...)"
 
-      // Remove the leading emoji and season info, keep everything from division onwards
-      var match = conf.match(/(Bronze|Silver|Gold)\s+•\s+(.+)$/);
-      if (match) {
-        return `• ${match[1]} • ${match[2]}`;
-      }
-      // Fallback: just show the whole line
-      return '• ' + conf.replace(/:white_check_mark:|✅/g, '').trim();
-    });
-
-    var batchSummary = summaryHeader + '\n' + summaryLines.join('\n');
-
-    // Discord has a 2000 character limit - if we exceed it, split into multiple messages
-    if (batchSummary.length > 1900) {
-      // Send header separately
-      sendLog(summaryHeader);
-
-      // Send lines in chunks to stay under limit
-      var chunk = '';
-      for (var i = 0; i < summaryLines.length; i++) {
-        var line = summaryLines[i];
-        if ((chunk + line + '\n').length > 1900) {
-          // Send current chunk
-          if (chunk) sendLog(chunk.trim());
-          chunk = line + '\n';
-        } else {
-          chunk += line + '\n';
+        // Remove the leading emoji and season info, keep everything from division onwards
+        var match = conf.match(/(Bronze|Silver|Gold)\s+•\s+(.+)$/);
+        if (match) {
+          return `• ${match[1]} • ${match[2]}`;
         }
-      }
-      // Send remaining chunk
-      if (chunk) sendLog(chunk.trim());
-    } else {
-      sendLog(batchSummary);
-    }
-  }
+        // Fallback: just show the whole line
+        return '• ' + conf.replace(/:white_check_mark:|✅/g, '').trim();
+      });
 
-  if (stoppedEarly) {
-    sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - stopped: ${stopReason}`);
-  } else {
-    sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - finished all available`);
+      var batchSummary = summaryHeader + '\n' + summaryLines.join('\n');
+
+      // Discord has a 2000 character limit - if we exceed it, split into multiple messages
+      if (batchSummary.length > 1900) {
+        // Send header separately
+        sendLog(summaryHeader);
+
+        // Send lines in chunks to stay under limit
+        var chunk = '';
+        for (var i = 0; i < summaryLines.length; i++) {
+          var line = summaryLines[i];
+          if ((chunk + line + '\n').length > 1900) {
+            // Send current chunk
+            if (chunk) sendLog(chunk.trim());
+            chunk = line + '\n';
+          } else {
+            chunk += line + '\n';
+          }
+        }
+        // Send remaining chunk
+        if (chunk) sendLog(chunk.trim());
+      } else {
+        sendLog(batchSummary);
+      }
+    }
+
+    if (stoppedEarly) {
+      sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - stopped: ${stopReason}`);
+    } else {
+      sendLog(`📊 Batch complete: ${processed} messages in ${elapsedSec}s (${percentUsed}% time used) - finished all available`);
+    }
   }
 
   // NEW: Check for pending alias suggestion DM replies
@@ -1414,6 +1417,140 @@ function processOneDiscordMessage(msg, startTime, options) {
   };
 }
 
+// =======================
+// PLAYOFF MESSAGE PREPROCESSING (v4.1.0)
+// =======================
+// Purpose: Handle playoff messages with map ban/pick sequences
+// Playoff messages have format:
+//   Division quarter/semi/finals: Team1 vs Team2
+//   [Multiple lines of bans/picks with emoji markers]
+//   date/time: <datetime>
+// Strategy: Detect playoff format, extract first line + datetime, strip ban/pick lines
+// =======================
+
+/**
+ * Detect if this is a playoff/bracket match message.
+ * Signals: "quarter finals", "semi finals", "finals", multiple "bans/picks"
+ * @param {string} text - Message content
+ * @returns {boolean} True if playoff message detected
+ */
+function isPlayoffMessage_(text) {
+  var lower = text.toLowerCase();
+
+  // Check for playoff keywords
+  var hasPlayoffKeyword = /\b(quarter\s*finals?|semi\s*finals?|semifinals?|finals?|playoffs?)\b/i.test(lower);
+
+  // Check for map ban/pick indicators (at least 3 mentions suggests playoff format)
+  var banPickCount = (text.match(/\b(bans?|picks?|pick)\b/gi) || []).length;
+  var hasMapBansPicks = banPickCount >= 3;
+
+  return hasPlayoffKeyword || hasMapBansPicks;
+}
+
+/**
+ * Preprocess playoff message into standard schedule format.
+ * Extracts: division, teams, date/time
+ * Strips: map bans/picks, emoji lines, mentions
+ * @param {string} text - Raw playoff message
+ * @returns {string} Normalized schedule message
+ */
+function preprocessPlayoffMessage_(text) {
+  var lines = text.split('\n');
+  var normalized = {
+    firstLine: '',
+    datetime: null,
+    mentions: []
+  };
+
+  // Extract first line (should contain division + teams)
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+
+    // Skip emoji-only lines or map action lines
+    // Pattern: :emoji: bans/picks something
+    if (/^:[a-zA-Z0-9_]+:\s*(bans?|picks?|pick)\b/i.test(line)) continue;
+    // Pattern: emoji bans/picks (actual Unicode emoji)
+    if (/^[\u{1F000}-\u{1F9FF}]\s*(bans?|picks?)\b/iu.test(line)) continue;
+
+    // First substantive line should be "Division: Team1 vs Team2" or "Division quarter finals: Team1 vs Team2"
+    if (!normalized.firstLine && /\b(bronze|silver|gold)\b/i.test(line)) {
+      normalized.firstLine = line;
+      continue;
+    }
+
+    // Extract date/time lines (lines mentioning time indicators)
+    if (/\b(date|time|est|edt|pst|cst|mst|sunday|monday|tuesday|wednesday|thursday|friday|saturday|noon|pm|am|\d{1,2}:\d{2})\b/i.test(line)) {
+      // Skip if it's clearly a ban/pick line that happens to contain a map with "time" in it
+      if (!/\b(bans?|picks?|pick)\b/i.test(line)) {
+        if (!normalized.datetime) {
+          normalized.datetime = line;
+        } else {
+          normalized.datetime += ' ' + line; // Append if datetime spans lines
+        }
+      }
+    }
+
+    // Extract mentions (for logging purposes)
+    var mentions = line.match(/@\w+/g);
+    if (mentions) {
+      normalized.mentions = normalized.mentions.concat(mentions);
+    }
+  }
+
+  // Reconstruct as standard format
+  var result = normalized.firstLine;
+
+  // First, clean up emoji markers and mentions from the first line
+  result = result
+    .replace(/<:[a-zA-Z0-9_]+:\d+>/g, '') // Remove Discord emoji syntax (full format: <:name:id>)
+    .replace(/:[a-zA-Z0-9_]+:/g, '') // Remove Discord emoji syntax (short format: :name:)
+    .replace(/[\u{1F000}-\u{1F9FF}]/gu, '') // Remove Unicode emoji
+    .replace(/@\w+\s*/g, ''); // Remove mentions
+
+  // Strip playoff keywords (quarter finals, semi finals, finals) from the first line
+  // This prevents them from interfering with team extraction in splitVsSides()
+  // Example: "Gold quarter finals: dicE vs soul" → "Gold: dicE vs soul"
+  // Handles both "Quarter Finals:" and "Quarter Finals Team1" formats
+  result = result.replace(/\s+(quarter\s*finals?|semi\s*finals?|semifinals?|finals?|playoffs?)\s*:?\s*/gi, function(match, keyword) {
+    // If the match includes a colon, replace with ": ", otherwise just remove the keyword
+    return match.indexOf(':') >= 0 ? ': ' : ' ';
+  });
+
+  // Clean up any double colons or extra whitespace created by removal
+  result = result.replace(/:\s*:+/g, ':').replace(/\s+/g, ' ').trim();
+
+  if (normalized.datetime) {
+    // Clean up datetime line
+    var dt = normalized.datetime;
+
+    // Remove "date/time:" style prefixes - must handle patterns like "date/time:", "/time:", "date:", "time:"
+    // Use multiple passes to ensure complete removal
+    dt = dt.replace(/^[^:]*\b(date|time)\s*[/:]\s*/i, ''); // Remove "date/" or "time/" at start
+    dt = dt.replace(/^[^:]*\b(date|time)\s*:\s*/i, ''); // Remove "date:" or "time:" at start
+
+    dt = dt
+      .replace(/@\w+\s*/g, '') // Remove mentions
+      .replace(/<:[a-zA-Z0-9_]+:\d+>/g, '') // Remove Discord emoji syntax (full format: <:name:id>)
+      .replace(/:[a-zA-Z0-9_]+:/g, '') // Remove Discord emoji syntax (short format: :name:)
+      .replace(/[\u{1F000}-\u{1F9FF}]/gu, '') // Remove Unicode emoji
+      .replace(/\b(noon|midday)\b/gi, 'PM') // Convert "Noon"/"Midday" to "PM" for parseWhenFlexible compatibility
+      .replace(/\bmidnight\b/gi, 'AM') // Convert "Midnight" to "AM" for parseWhenFlexible compatibility
+      .replace(/\bserver\s+and\s+start\s+time\s+tbd\b/gi, 'TBD') // Convert "Server and start time TBD" → "TBD"
+      .replace(/\b(start\s+time|starts?|will\s+start|beginning|begins?)\s*\.?\s*/gi, '') // Remove "start" filler words
+      .replace(/\b(any|a|the)?\s*(server|ny|dallas|chicago|la|west|east|coast)\s+(server\s+)?.*?\(tbd\)/gi, '') // Remove server TBD references
+      .replace(/\b(any|a|the)?\s*(server|ny|dallas|chicago|la|west|east|coast)\s+(server\s+)?/gi, '') // Remove remaining server location references
+      .replace(/\(tbd\)/gi, '') // Remove any remaining (tbd) markers
+      .replace(/[.,;]+\s*$/g, '') // Remove trailing punctuation
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+
+    result += ' ' + dt;
+  }
+
+  return result;
+}
+
 /**
  * Parse a Discord message (string) into schedule update pairs.
  * Returns { ok, pairs: [{division, home, away, epochSec?, whenText, weekKey}], trace }
@@ -1431,6 +1568,23 @@ function parseScheduleMessage_v3(text, messageDate, messageObj) {
   // (caches in 05_util.gs will naturally persist until explicitly cleared)
   try {
     var raw = String(text || '');
+
+    // NEW (v4.1.0): Detect and preprocess playoff messages
+    if (isPlayoffMessage_(raw)) {
+      trace.push('playoff_message_detected=true');
+      var preprocessed = preprocessPlayoffMessage_(raw);
+      trace.push('playoff_preprocessed=' + preprocessed);
+
+      if (typeof logToSheet === 'function') {
+        logToSheet('🏆 Playoff message detected and preprocessed:\n' +
+                   'Original (first 200 chars): ' + raw.substring(0, 200) + '...\n' +
+                   'Preprocessed: ' + preprocessed);
+      }
+
+      // Use preprocessed text for parsing
+      raw = preprocessed;
+    }
+
     raw = cleanScheduleText(raw);
     var cleaned = stripDiscordNoise(raw);
     trace.push('cleaned=' + cleaned);

@@ -209,10 +209,14 @@ function removeAutomaticPolling() {
  */
 function automaticPollingHandler() {
   try {
-    // Get the secret from script properties
-    var secret = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
+    // Get the secret from script properties (check multiple property names for compatibility)
+    var sp = PropertiesService.getScriptProperties();
+    var secret = sp.getProperty('WM_WEBAPP_SHARED_SECRET') ||
+                 sp.getProperty('WEBAPP_SECRET') ||
+                 sp.getProperty('WEBAPP_SECRET_V2') ||
+                 sp.getProperty('RELAY_SHARED_SECRET');
     if (!secret) {
-      Logger.log('ERROR: WEBAPP_SECRET not set in script properties');
+      Logger.log('ERROR: No webapp secret found in script properties (checked WM_WEBAPP_SHARED_SECRET, WEBAPP_SECRET, WEBAPP_SECRET_V2, RELAY_SHARED_SECRET)');
       return;
     }
 

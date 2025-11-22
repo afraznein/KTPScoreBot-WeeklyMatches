@@ -17,16 +17,36 @@
 //
 // =======================
 
-const VERSION = '4.0.2';
-const VERSION_DATE = '2025-11-12';
+const VERSION = '4.1.1';
+const VERSION_DATE = '2025-11-21';
 
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 4.0.2
- * Last Updated: 2025-11-12
+ * Version: 4.1.1
+ * Last Updated: 2025-11-21
  *
  * CHANGELOG:
+ * v4.1.1 (2025-11-21) - BUGFIX: Automatic polling handler and silent batch reporting
+ *                      - FIXED: automaticPollingHandler() now checks WM_WEBAPP_SHARED_SECRET first
+ *                      - CHANGED: Handler checks multiple secret property names (WM_WEBAPP_SHARED_SECRET, WEBAPP_SECRET, etc.)
+ *                      - FIXED: Empty polling batches (0 messages) no longer send Discord notifications
+ *                      - CHANGED: pollAndProcessFromId() only sends confirmations/completion when processed > 0
+ *                      - Impact: Reduces Discord spam from automatic polling when no new messages exist
+ *                      - Location: 10_storage.gs (lines 210-221), 60_parser.gs (lines 1160-1215)
+ * v4.1.0 (2025-11-21) - FEATURE: Playoff message parsing support
+ *                      - NEW: isPlayoffMessage_() - Detect playoff bracket messages
+ *                      - NEW: preprocessPlayoffMessage_() - Extract teams/datetime from multi-map playoff formats
+ *                      - CHANGED: parseScheduleMessage_v3() now preprocesses playoff messages before parsing
+ *                      - SUPPORTS: "Quarter finals", "Semi finals", "Finals" message formats
+ *                      - HANDLES: Multi-line map ban/pick sequences with emoji markers
+ *                      - EXTRACTS: Division, teams, date/time from complex playoff announcements
+ *                      - STRIPS: Ban/pick lines, emoji markers, playoff keywords, server references
+ *                      - CLEANS: "date/time:" prefixes, "start time" filler words, server TBD notes
+ *                      - BACKWARD COMPATIBLE: Regular season messages unaffected
+ *                      - Location: 60_parser.gs (lines 1434-1564)
+ *                      - Impact: Enables automatic parsing of playoff match schedules
+ *                      - See: deployment/PLAYOFF_PARSER_ENHANCEMENT.md for full documentation
  * v4.0.2 (2025-11-12) - UX: Consolidated polling interface improvements
  *                      - CHANGED: Polling section now matches Historical Parsing layout
  *                      - NEW: Discord message link for last processed polling ID
