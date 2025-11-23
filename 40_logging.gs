@@ -110,8 +110,14 @@ function formatScheduleConfirmationLine(parsed, row, authorId, msgId) {
  * @param {string} sourceChannel - Discord channel name where messages were parsed from
  */
 function logParsingSummary(successCount, tentativeCount, sourceChannel) {
-  const emoji = EMOJI_OK;
   const total = successCount + tentativeCount;
+
+  // Skip logging if no matches were parsed (0, 0, 0)
+  if (total === 0) {
+    return;
+  }
+
+  const emoji = EMOJI_OK;
   const msg = `${emoji} Parsed ${total} matches (${successCount} scheduled, ${tentativeCount} tentative)` +
     (sourceChannel ? ` — from #${sourceChannel}` : '');
   sendLog(msg);
