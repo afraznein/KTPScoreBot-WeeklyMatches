@@ -17,16 +17,23 @@
 //
 // =======================
 
-const VERSION = '4.1.1';
-const VERSION_DATE = '2025-11-21';
+const VERSION = '4.1.2';
+const VERSION_DATE = '2025-11-24';
 
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 4.1.1
- * Last Updated: 2025-11-21
+ * Version: 4.1.2
+ * Last Updated: 2025-11-24
  *
  * CHANGELOG:
+ * v4.1.2 (2025-11-24) - BUGFIX: Week detection now properly handles current week window
+ *                      - FIXED: findActiveIndexByDate() now checks if today falls within week window (Mon-Sun)
+ *                      - FIXED: Manual weekly posts no longer stuck on old week after matches complete
+ *                      - CHANGED: Week is considered "active" if today is within Mon-Sun OR week is in future
+ *                      - IMPROVED: Playoff weeks (semifinals, finals) now correctly detected after previous round completes
+ *                      - Impact: Weekly table generation now advances to next week correctly
+ *                      - Location: 20_sheets.gs (lines 87-131)
  * v4.1.1 (2025-11-21) - BUGFIX: Automatic polling handler and silent batch reporting
  *                      - FIXED: automaticPollingHandler() now checks WM_WEBAPP_SHARED_SECRET first
  *                      - CHANGED: Handler checks multiple secret property names (WM_WEBAPP_SHARED_SECRET, WEBAPP_SECRET, etc.)

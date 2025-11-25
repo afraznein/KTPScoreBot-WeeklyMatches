@@ -86,6 +86,7 @@ function formatWeekRangeET(d) {
 
 /**
  * Find the active week block index by comparing today's date to sheet dates.
+ * Returns the week if today falls within the week window (Mon-Sun) or if the week is in the future.
  * @param {Sheet} sheet - Division sheet to scan
  * @returns {number} Block index (0-based) or 0 if none found
  */
@@ -99,7 +100,31 @@ function findActiveIndexByDate(sheet) {
     var s = sheet.getRange(dateRow, 1).getDisplayValue().trim();
     if (!s) { i++; continue; }
     var d = parseSheetDateET(s);
-    if (d) { lastGood = i; if (d.getTime() >= todayEt.getTime()) return i; }
+    if (d) {
+      lastGood = i;
+
+      // Calculate the week window (Monday through Sunday) for this match date
+      var weekDate = new Date(d.getTime());
+      var dayOfWeek = weekDate.getDay(); // 0=Sunday, 1=Monday, etc.
+
+      // Calculate Monday of this week (start of week)
+      var daysFromMonday = (dayOfWeek === 0) ? 6 : (dayOfWeek - 1);
+      var weekStart = new Date(weekDate.getTime());
+      weekStart.setDate(weekStart.getDate() - daysFromMonday);
+      weekStart.setHours(0, 0, 0, 0);
+
+      // Calculate Sunday of this week (end of week)
+      var weekEnd = new Date(weekStart.getTime());
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+
+      // Return this week if:
+      // 1. Today falls within the week window (Mon-Sun), OR
+      // 2. The week is in the future
+      if ((todayEt >= weekStart && todayEt <= weekEnd) || d.getTime() > todayEt.getTime()) {
+        return i;
+      }
+    }
     i++;
   }
   return (lastGood >= 0 ? lastGood : 0);
