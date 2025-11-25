@@ -93,6 +93,12 @@ function formatWeekRangeET(d) {
 function findActiveIndexByDate(sheet) {
   var G = gridMeta(), tz = 'America/New_York';
   var todayEt = new Date(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd') + 'T00:00:00-04:00');
+
+  // DEBUG: Log today's date
+  if (typeof logToSheet === 'function') {
+    logToSheet('🔍 findActiveIndexByDate: Today is ' + Utilities.formatDate(todayEt, tz, 'yyyy-MM-dd (EEEE)'));
+  }
+
   var i = 0, lastGood = -1;
   while (i < 200) {
     var dateRow = G.firstDateRow + i * G.stride;
@@ -121,7 +127,17 @@ function findActiveIndexByDate(sheet) {
       // Return this week if:
       // 1. Today falls within the week window (Mon-Sun), OR
       // 2. The week is in the future
-      if ((todayEt >= weekStart && todayEt <= weekEnd) || d.getTime() > todayEt.getTime()) {
+      var inWindow = (todayEt >= weekStart && todayEt <= weekEnd);
+      var isFuture = (d.getTime() > todayEt.getTime());
+
+      if (inWindow || isFuture) {
+        // DEBUG: Log which week was selected and why
+        if (typeof logToSheet === 'function') {
+          var reason = inWindow ? 'within week window' : 'future week';
+          logToSheet('✅ Selected week ' + i + ' (' + s + ') - ' + reason +
+                     ' | Window: ' + Utilities.formatDate(weekStart, tz, 'MM/dd') +
+                     ' - ' + Utilities.formatDate(weekEnd, tz, 'MM/dd'));
+        }
         return i;
       }
     }
@@ -243,6 +259,11 @@ function getAlignedUpcomingWeekOrReport() {
   var G = gridMeta(); var gold = getSheetByName('Gold');
   if (!gold) throw new Error('Sheet "Gold" not found');
   var idx = findActiveIndexByDate(gold);
+
+  // DEBUG: Log which week index was selected
+  if (typeof logToSheet === 'function') {
+    logToSheet('📅 getAlignedUpcomingWeekOrReport: Selected week index ' + idx);
+  }
 
   var mapRef = gold.getRange(G.firstMapRow + idx * G.stride, 1).getDisplayValue().trim();
   var dateTx = gold.getRange(G.firstDateRow + idx * G.stride, 1).getDisplayValue().trim();

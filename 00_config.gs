@@ -17,16 +17,22 @@
 //
 // =======================
 
-const VERSION = '4.1.2';
+const VERSION = '4.1.3';
 const VERSION_DATE = '2025-11-24';
 
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 4.1.2
+ * Version: 4.1.3
  * Last Updated: 2025-11-24
  *
  * CHANGELOG:
+ * v4.1.3 (2025-11-24) - DEBUG: Added logging to diagnose week detection issues
+ *                      - ADDED: Debug logging in findActiveIndexByDate() to show today's date
+ *                      - ADDED: Debug logging when week is selected (shows reason and window dates)
+ *                      - ADDED: Debug logging in getAlignedUpcomingWeekOrReport() to show selected index
+ *                      - Impact: Helps diagnose why manual weekly post might select wrong week
+ *                      - Location: 20_sheets.gs (lines 97-100, 134-141, 247-250)
  * v4.1.2 (2025-11-24) - BUGFIX: Week detection now properly handles current week window
  *                      - FIXED: findActiveIndexByDate() now checks if today falls within week window (Mon-Sun)
  *                      - FIXED: Manual weekly posts no longer stuck on old week after matches complete
