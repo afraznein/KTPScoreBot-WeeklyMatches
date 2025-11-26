@@ -17,16 +17,22 @@
 //
 // =======================
 
-const VERSION = '4.1.3';
-const VERSION_DATE = '2025-11-24';
+const VERSION = '4.1.4';
+const VERSION_DATE = '2025-11-25';
 
 /**
  * KTPScoreBot-WeeklyMatches Configuration
  *
- * Version: 4.1.3
- * Last Updated: 2025-11-24
+ * Version: 4.1.4
+ * Last Updated: 2025-11-25
  *
  * CHANGELOG:
+ * v4.1.4 (2025-11-25) - BUGFIX: Fixed timezone offset causing wrong dates and times
+ *                      - FIXED: parseSheetDateET() now detects DST vs EST based on month (not hardcoded -04:00)
+ *                      - FIXED: deriveWeekMetaFromDivisionTop() uses setHours instead of hardcoded offset
+ *                      - CHANGED: Dates in Nov-Feb use EST (-05:00), Mar-Oct use EDT (-04:00)
+ *                      - Impact: Weekly posts now show correct date (11/30 not 11/29) and time (9:00 PM not 11:00 PM)
+ *                      - Location: 20_sheets.gs (lines 61-80, 321-327)
  * v4.1.3 (2025-11-24) - DEBUG: Added logging to diagnose week detection issues
  *                      - ADDED: Debug logging in findActiveIndexByDate() to show today's date
  *                      - ADDED: Debug logging when week is selected (shows reason and window dates)

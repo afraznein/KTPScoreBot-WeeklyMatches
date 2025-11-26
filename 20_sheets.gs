@@ -65,8 +65,18 @@ function parseSheetDateET(s) {
   if (!m) { var d0 = new Date(s); return isNaN(d0.getTime()) ? null : d0; }
   var mm = +m[1], dd = +m[2], yy = m[3] ? +m[3] : null; if (yy && yy < 100) yy += 2000;
   var y = yy || (new Date()).getFullYear();
+
   var iso = Utilities.formatString('%04d-%02d-%02d', y, mm, dd);
-  var d = new Date(iso + 'T00:00:00-04:00'); return isNaN(d.getTime()) ? null : d;
+
+  // Determine if this date is in DST (EDT) or standard time (EST)
+  // DST in US: 2nd Sunday in March to 1st Sunday in November
+  // Simplified: March-October likely DST, November-February likely EST
+  // For accuracy, check the month
+  var isDST = (mm >= 3 && mm <= 10); // March through October
+  var offset = isDST ? '-04:00' : '-05:00';
+
+  var d = new Date(iso + 'T00:00:00' + offset);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 /**
@@ -139,10 +149,23 @@ function findActiveIndexByDate(sheet) {
                      ' - ' + Utilities.formatDate(weekEnd, tz, 'MM/dd'));
         }
         return i;
+      } else {
+        // DEBUG: Log weeks that didn't match
+        if (typeof logToSheet === 'function') {
+          logToSheet('⏭️ Skipped week ' + i + ' (' + s + ') - past week | Window: ' +
+                     Utilities.formatDate(weekStart, tz, 'MM/dd') + ' - ' +
+                     Utilities.formatDate(weekEnd, tz, 'MM/dd'));
+        }
       }
     }
     i++;
   }
+
+  // DEBUG: Log fallback to lastGood
+  if (typeof logToSheet === 'function') {
+    logToSheet('⚠️ No matching week found, falling back to lastGood index: ' + lastGood);
+  }
+
   return (lastGood >= 0 ? lastGood : 0);
 }
 
@@ -306,9 +329,10 @@ function deriveWeekMetaFromDivisionTop(division, top) {
   var range = date ? formatWeekRangeET(date) : '';
   var epochSec = null;
   if (date) {
-    var dEt = Utilities.formatDate(date, tz, 'yyyy-MM-dd');
-    // default kickoff 9:00 PM ET
-    var dt = new Date(dEt + 'T21:00:00-04:00');
+    // Create date at 9:00 PM ET on the match date
+    // Use setHours to avoid hardcoding timezone offset (handles EST/EDT automatically)
+    var dt = new Date(date.getTime());
+    dt.setHours(21, 0, 0, 0); // 9:00 PM in the same timezone as the input date
     epochSec = Math.floor(dt.getTime() / 1000);
   }
   return { label: label, mapRef: mapRef, date: date, range: range, epochSec: epochSec };
