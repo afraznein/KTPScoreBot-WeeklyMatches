@@ -2,8 +2,8 @@
 
 **Automated weekly match scheduling and Discord board management for competitive Day of Defeat leagues**
 
-**Version**: 3.0.0
-**Last Updated**: 2025-11-02
+**Version**: 4.1.4
+**Last Updated**: 2025-11-25
 
 A Google Apps Script automation system that monitors Discord for schedule messages, parses match times using natural language, updates Google Sheets automatically, and maintains live Discord weekly boards with formatted match tables for three competitive divisions.
 
