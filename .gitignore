@@ -1,2 +1,5 @@
 /.claude
 /deployment
+
+# Claude Code context (contains production credentials)
+CLAUDE.md
